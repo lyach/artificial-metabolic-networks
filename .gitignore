@@ -1,0 +1,28 @@
+__pycache__/
+.ipynb_checkpoints/
+.Rhistory
+.DS_Store
+Dataset_input/.DS_Store
+Dataset_model/.DS_Store
+Reservoir/.DS_Store
+Result/.DS_Store
+Xpal_datasets/.DS_Store
+Result/MM_QP_Loss_e_coli_core_EB.csv
+Result/MM_QP_Loss_e_coli_core_UB.csv
+old/
+biolog_simulations.npy
+Reservoir/IJN*.h5
+
+# environment files
+.venv/
+uv.lock
+
+# experiments
+experiments/*
+
+# Large models
+Reservoir/*
+
+# Results
+data/interim/*
+data/processed/*

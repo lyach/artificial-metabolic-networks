@@ -1,0 +1,44 @@
+# --- Project Metadata ---
+[project]
+name = "BactoCat-AMN"
+version = "0.1.0"
+description = "Hybrid machine learning for metabolic flux prediction in E. coli"
+readme = "README.md"
+requires-python = ">=3.9"
+
+# --- Dependencies ---
+# Mapped directly from environment_amn.yml
+dependencies = [
+    "tensorflow[and-cuda]==2.15.1",
+    "keras>=2.15,<3.0",
+    "numpy>=1.24",
+    "cobra",
+    "pandas",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "pydoe2",
+    "ipykernel",
+    "silence-tensorflow",
+    "protobuf==3.20.3",
+    "matplotlib-inline==0.1.6",
+    "requests",
+    "jupytext>=1.15.2", # delete later
+    "referencing<0.30.0",  # delete later
+    "jsonschema<5.0.0",    # delete later
+    "scikeras>=0.12.0",
+    "tqdm>=4.67.3",
+]
+
+# --- Build System ---
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# --- Package Discovery ---
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+# --- uv Configuration ---
+[tool.uv]
+index-url = "https://pypi.org/simple"
