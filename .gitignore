@@ -26,3 +26,7 @@ Reservoir/*
 # Results
 data/interim/*
 data/processed/*
+
+# Slurm 
+scripts/slurm/*
+logs/*

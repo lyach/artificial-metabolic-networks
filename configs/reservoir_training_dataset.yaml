@@ -1,0 +1,30 @@
+# Configuration for generating FBA-simulated training set for Reservoir AMN
+# This config is used by scripts/create_reservoir_training_dataset.py
+
+# Random seed for reproducibility
+seed: 10
+
+# Model parameters
+cobraname: 'iML1515_duplicated'  # Name of the COBRA model (without .xml extension)
+mediumbound: 'UB'  # Exact bound (EB) or upper bound (UB)
+
+# Experimental dataset parameters
+expname: 'aidaying_media_growth_amns_padded'  # Name of the experimental dataset (without .csv extension)
+mediumsize: 59  # Number of medium compounds
+
+# Medium parameters file (for FBA simulation)
+mediumfile: 'aidaying_parameters'  # Name of the medium parameters file (without .csv extension)
+
+# Training set generation parameters
+size: 924  # Number of experimental conditions
+size_i: 50  # Training set size per condition (samples to generate per condition)
+
+# Model reduction
+reduce: false  # Set to true if you want to reduce the model
+
+# Output file naming
+# The output will be saved as: data/processed/{output_prefix}_{mediumbound}.npz
+output_prefix: 'aidaying_iml1515'
+
+# Verbosity
+verbose: true  # Print progress information
