@@ -19,6 +19,9 @@ mediumfile: 'aidaying_parameters'  # Name of the medium parameters file (without
 size: 924  # Number of experimental conditions
 size_i: 50  # Training set size per condition (samples to generate per condition)
 
+# Parallelism
+num_workers: 35  # Number of parallel worker processes for FBA simulations
+
 # Model reduction
 reduce: false  # Set to true if you want to reduce the model
 

@@ -6,15 +6,21 @@ This script generates an FBA-simulated dataset for the AMN Reservoir using exper
 The generation relies on the Aida & Ying Dataset, a CSV where rows = conditions and 
 cols = exchanges + growth_value.
 
+Supports multiprocessing to parallelize FBA simulations across conditions within a single node.
+
 Usage:
     python scripts/create_reservoir_training_dataset.py configs/reservoir_training_dataset.yaml
+    python scripts/create_reservoir_training_dataset.py --num-workers 16 configs/reservoir_training_dataset.yaml
 """
 
 import sys
 import argparse
+import time
 from pathlib import Path
 import yaml
 import numpy as np
+import multiprocessing as mp
+from tqdm import tqdm
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -25,8 +31,91 @@ if str(PROJECT_ROOT) not in sys.path:
 DATA_INTERIM_DIR = PROJECT_ROOT / 'data' / 'interim'
 DATA_PROCESSED_DIR = PROJECT_ROOT / 'data' / 'processed'
 
-from src.Build_Dataset import TrainingSet
+from src.Build_Dataset import TrainingSet, get_io_cobra, get_index_from_id
 
+
+# ---- Multiprocessing worker functions ----
+
+# Per-worker global state (initialized once per worker process via pool initializer)
+_worker_model = None
+_worker_params = None
+
+
+def _init_worker(cobrafile, objective, medium, mediumbound,
+                 levmed, valmed, ratmed, method):
+    """
+    Pool initializer: each worker process loads its own COBRA model
+    and caches shared parameters to avoid repeated serialization.
+
+    This is called once when each worker process starts, so the model
+    is loaded only num_workers times total (not once per condition).
+    """
+    global _worker_model, _worker_params
+    import cobra
+    import optlang
+    optlang.glpk_interface.Configuration()
+    _worker_model = cobra.io.read_sbml_model(cobrafile + '.xml')
+    _worker_params = {
+        'objective': list(objective),
+        'medium': list(medium),
+        'mediumbound': str(mediumbound),
+        'levmed': list(levmed),
+        'valmed': list(valmed),
+        'ratmed': float(ratmed),
+        'method': str(method),
+    }
+
+
+def _process_condition(args):
+    """
+    Worker function: generate `size_i` FBA samples for a single condition.
+
+    Each call runs size_i FBA simulations using the worker's own COBRA model
+    and a per-condition random seed for reproducibility.
+
+    Args:
+        args: tuple of (condition_index, varmed_list, sample_size, random_seed, progress_queue)
+
+    Returns:
+        tuple: (condition_index, X_array, Y_array, error_string_or_None)
+    """
+    condition_idx, varmed_i, size_i, condition_seed, progress_queue = args
+    global _worker_model, _worker_params
+
+    # Seed RNG per condition for reproducibility across runs
+    np.random.seed(condition_seed)
+
+    try:
+        X, Y = {}, {}
+        for i in range(size_i):
+            X[i], Y[i] = get_io_cobra(
+                _worker_model,
+                _worker_params['objective'],
+                _worker_params['medium'],
+                _worker_params['mediumbound'],
+                varmed_i,
+                _worker_params['levmed'],
+                _worker_params['valmed'],
+                _worker_params['ratmed'],
+                None,  # Pout (E parameter) — unused inside get_io_cobra
+                method=_worker_params['method'],
+                verbose=False,
+            )
+            # Report progress after each simulation
+            if progress_queue is not None:
+                progress_queue.put(1)
+        
+        X_arr = np.asarray(list(X.values()))
+        Y_arr = np.asarray(list(Y.values()))
+        return (condition_idx, X_arr, Y_arr, None)
+    except Exception as e:
+        # Report failed simulations to progress bar
+        if progress_queue is not None:
+            progress_queue.put(size_i)
+        return (condition_idx, None, None, str(e))
+
+
+# ── Configuration & main logic ────────────────────────────────────────────────
 
 def load_config(config_path):
     """Load configuration from YAML file."""
@@ -54,6 +143,7 @@ def create_reservoir_training_dataset(config):
     verbose = config['verbose']
     mediumfile = config['mediumfile']
     output_prefix = config['output_prefix']
+    num_workers = config.get('num_workers', 1)
     
     # Set random seed
     np.random.seed(seed=seed)
@@ -72,6 +162,7 @@ def create_reservoir_training_dataset(config):
         print(f"  Reduce model: {reduce}")
         print(f"  Medium parameters file: {mediumfile}")
         print(f"  Output prefix: {output_prefix}")
+        print(f"  Parallel workers: {num_workers}")
         print()
     
     # Define file paths
@@ -97,13 +188,11 @@ def create_reservoir_training_dataset(config):
     X = parameter.X.copy()
     if verbose:
         print(f"\nX shape: {X.shape}")
-        print(f"X:\n{X}\n")
     
     # Store the growth data (Y vector: growth rate per condition)
     Y = parameter.Y.copy()
     if verbose:
         print(f"Y shape: {Y.shape}")
-        print(f"Y:\n{Y}\n")
     
     # Get parameter object for reservoir training set from medium parameters file
     mediumfile_path = DATA_PROCESSED_DIR / mediumfile  # .csv
@@ -135,28 +224,106 @@ def create_reservoir_training_dataset(config):
         print(f"Example - varmed[0]: {varmed[0] if len(varmed) > 0 else 'N/A'}")
         print()
     
-    # Generate FBA-simulated dataset
+    # Generate FBA-simulated dataset (parallel)
+    n_conditions = X.shape[0]
+    total_simulations = size_i * n_conditions
+    
     if verbose:
         print("-" * 80)
         print("Step 3.2: Creating FBA-simulated dataset")
         print("-" * 80)
-        print(f"Generating {size_i} samples per condition...")
+        print(f"Generating {size_i} samples x {n_conditions} conditions "
+              f"= {total_simulations} total FBA simulations")
+        print(f"Using {num_workers} parallel workers")
         print()
     
-    # Get a COBRApy-generated training set constrained by varmed
+    # Create a Manager queue for progress reporting from workers
+    manager = mp.Manager()
+    progress_queue = manager.Queue()
+    
+    # Build argument list: each condition gets its own reproducible seed
+    worker_args = [
+        (i, varmed[i], size_i, seed + i, progress_queue)
+        for i in range(n_conditions)
+    ]
+    
     successful_conditions = 0
     failed_conditions = 0
+    results_by_idx = {}
     
-    for i in range(X.shape[0]):
-        try:
-            if verbose:
-                print(f"Condition {i}/{X.shape[0]}: {varmed[i]}")
-            parameter.get(sample_size=size_i, varmed=varmed[i], verbose=verbose)
-            successful_conditions += 1
-        except Exception as e:
-            print(f"WARNING: Skipping condition {i} (varmed={varmed[i]}): {e}")
-            failed_conditions += 1
-            continue
+    with mp.Pool(
+        processes=num_workers,
+        initializer=_init_worker,
+        initargs=(
+            str(cobrafile),
+            parameter.objective,
+            parameter.medium,
+            parameter.mediumbound,
+            parameter.levmed,
+            parameter.valmed,
+            parameter.ratmed,
+            parameter.method,
+        ),
+    ) as pool:
+        # Submit all conditions asynchronously
+        async_result = pool.map_async(_process_condition, worker_args)
+        
+        # Poll the progress
+        with tqdm(total=total_simulations, desc="FBA simulations", unit="sim") as pbar:
+            while not async_result.ready():
+                while not progress_queue.empty():
+                    try:
+                        pbar.update(progress_queue.get_nowait())
+                    except Exception:
+                        break
+                time.sleep(0.2)
+            
+            # Drain remaining progress updates after completion
+            while not progress_queue.empty():
+                try:
+                    pbar.update(progress_queue.get_nowait())
+                except Exception:
+                    break
+        
+        # Collect results
+        all_results = async_result.get()
+        for cond_idx, X_cond, Y_cond, error in all_results:
+            if error is not None:
+                print(
+                    f"WARNING: Skipping condition {cond_idx} "
+                    f"(varmed={varmed[cond_idx]}): {error}"
+                )
+                failed_conditions += 1
+            else:
+                results_by_idx[cond_idx] = (X_cond, Y_cond)
+                successful_conditions += 1
+    
+    # Aggregate results in original condition order
+    if results_by_idx:
+        ordered_X = []
+        ordered_Y = []
+        for idx in sorted(results_by_idx.keys()):
+            X_cond, Y_cond = results_by_idx[idx]
+            ordered_X.append(X_cond)
+            ordered_Y.append(Y_cond)
+        
+        combined_X = np.concatenate(ordered_X, axis=0)
+        combined_Y = np.concatenate(ordered_Y, axis=0)
+        
+        # Handle 'EB' mediumbound: replace X columns with corresponding Y columns
+        if parameter.mediumbound == 'EB':
+            col = 0
+            for rid in parameter.medium:
+                j = get_index_from_id(rid, parameter.model.reactions)
+                combined_X[:, col] = combined_Y[:, j]
+                col += 1
+        
+        parameter.X = combined_X
+        parameter.Y = combined_Y
+        parameter.size = parameter.X.shape[0]
+    else:
+        print("ERROR: All conditions failed. No training data generated.")
+        sys.exit(1)
     
     if verbose:
         print()
@@ -164,6 +331,9 @@ def create_reservoir_training_dataset(config):
         print("Summary:")
         print(f"  Successful conditions: {successful_conditions}")
         print(f"  Failed conditions: {failed_conditions}")
+        print(f"  Total samples: {parameter.size}")
+        print(f"  X shape: {parameter.X.shape}")
+        print(f"  Y shape: {parameter.Y.shape}")
         print("-" * 80)
         print()
     
@@ -192,12 +362,20 @@ def main():
         epilog="""
 Example:
     python scripts/create_reservoir_training_dataset.py configs/reservoir_training_dataset.yaml
+    python scripts/create_reservoir_training_dataset.py --num-workers 16 configs/reservoir_training_dataset.yaml
         """
     )
     parser.add_argument(
         'config',
         type=str,
         help='Path to YAML configuration file'
+    )
+    parser.add_argument(
+        '--num-workers', '-w',
+        type=int,
+        default=None,
+        help='Number of parallel workers.'
+             'Defaults to value in config, or 1 if not specified.'
     )
     
     args = parser.parse_args()
@@ -214,6 +392,10 @@ Example:
     except Exception as e:
         print(f"Error loading configuration file: {e}")
         sys.exit(1)
+    
+    # CLI --num-workers overrides config file value
+    if args.num_workers is not None:
+        config['num_workers'] = args.num_workers
     
     # Run the training set generation
     try:
