@@ -60,6 +60,7 @@ from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
 from sklearn.model_selection import train_test_split
 
 import matplotlib.pyplot as plt
+import os
 
 ###############################################################################
 # Custom functions for training
@@ -1372,6 +1373,16 @@ class Neural_Model:
         fileparam = filename + "_param.csv"
         print(fileparam)
         filemodel = filename + "_model.h5"
+
+        # Ensure output directory exists (open/save won't create parent folders)
+        out_paths = [fileparam, filemodel]
+        if self.model_type == "AMN_LP":
+            out_paths.append(filename + "_model.json")
+        for p in out_paths:
+            d = os.path.dirname(p)
+            if d:
+                os.makedirs(d, exist_ok=True)
+
         s = str(self.trainingfile) + ","\
                     + str(self.model_type) + ","\
                     + str(self.objective) + ","\
