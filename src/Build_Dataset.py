@@ -692,10 +692,10 @@ class TrainingSet:
         get_matrices_LP(self.model, self.mediumbound, self.X, self.S,
                              self.Pin, self.medium, self.objective)
         # save cobra file
-        cobra.io.write_sbml_model(self.model, filename+'.xml')
+        cobra.io.write_sbml_model(self.model, str(filename)+'.xml')
         # save parameters
         np.savez_compressed(filename, 
-                            cobraname = filename,
+                            cobraname = str(filename),
                             reduce = self.reduce,
                             mediumname = self.mediumname,
                             mediumbound = self.mediumbound,

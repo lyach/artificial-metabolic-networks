@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Generate FBA-simulated training set for Reservoir AMN
+Generate pFBA-simulated training set for Reservoir AMN
 
-This script generates an FBA-simulated dataset for the AMN Reservoir using experimental data.
+This script generates an pFBA-simulated dataset for the AMN Reservoir using experimental data.
 The generation relies on the Aida & Ying Dataset, a CSV where rows = conditions and 
 cols = exchanges + growth_value.
 
-Supports multiprocessing to parallelize FBA simulations across conditions within a single node.
+Supports multiprocessing to parallelize pFBA simulations across conditions within a single node.
 
 Usage:
     python scripts/create_reservoir_training_dataset.py configs/reservoir_training_dataset.yaml
@@ -16,6 +16,7 @@ Usage:
 import sys
 import argparse
 import time
+import uuid
 from pathlib import Path
 import yaml
 import numpy as np
@@ -68,9 +69,9 @@ def _init_worker(cobrafile, objective, medium, mediumbound,
 
 def _process_condition(args):
     """
-    Worker function: generate `size_i` FBA samples for a single condition.
+    Worker function: generate `size_i` pFBA samples for a single condition.
 
-    Each call runs size_i FBA simulations using the worker's own COBRA model
+    Each call runs size_i pFBA simulations using the worker's own COBRA model
     and a per-condition random seed for reproducibility.
 
     Args:
@@ -126,7 +127,7 @@ def load_config(config_path):
 
 def create_reservoir_training_dataset(config):
     """
-    Generate FBA-simulated training set for Reservoir AMN.
+    Generate pFBA-simulated training set for Reservoir AMN.
     
     Args:
         config (dict): Configuration dictionary with parameters
@@ -145,13 +146,19 @@ def create_reservoir_training_dataset(config):
     output_prefix = config['output_prefix']
     num_workers = config.get('num_workers', 1)
     
+    # Use run ID from config or generate a unique one
+    run_id = config.get('run_id', uuid.uuid4().hex[:8])
+    run_dir = DATA_PROCESSED_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    
     # Set random seed
     np.random.seed(seed=seed)
     
     if verbose:
         print("=" * 80)
-        print("Step 3: Generate FBA-simulated training set for Reservoir AMN")
+        print("Step 3: Generate pFBA-simulated training set for Reservoir AMN")
         print("=" * 80)
+        print(f"  Run ID: {run_id}")
         print(f"\nConfiguration:")
         print(f"  Seed: {seed}")
         print(f"  COBRA model: {cobraname}")
@@ -200,7 +207,7 @@ def create_reservoir_training_dataset(config):
         cobraname=str(cobrafile),
         mediumname=str(mediumfile_path),
         mediumbound=mediumbound,
-        method='FBA',
+        method='pFBA',
         verbose=verbose
     )
     
@@ -210,30 +217,35 @@ def create_reservoir_training_dataset(config):
         print("Creating varmed (variable medium compounds per condition)")
         print("-" * 80)
     
-    varmed = {}
+    varmed_dict = {}
     for i in range(X.shape[0]):
-        varmed[i] = []
+        varmed_dict[i] = []
         for j in range(X.shape[1]):
             if parameter.levmed[j] > 1 and X[i, j] > 0:
-                varmed[i].append(parameter.medium[j])
+                varmed_dict[i].append(parameter.medium[j])
     
-    varmed = list(varmed.values())
+    # Keep only unique varmed items by converting
+    # inner lists to tuples and deduplicate while preserving order
+    varmed_all = list(varmed_dict.values())
+    unique_tuples = dict.fromkeys(tuple(row) for row in varmed_all)
+    varmed = [list(unique_item) for unique_item in unique_tuples]
     
     if verbose:
-        print(f"varmed length: {len(varmed)}")
+        print(f"Original varmed len: {len(varmed_all)}")
+        print(f"Unique varmed len: {len(varmed)}")
         print(f"Example - varmed[0]: {varmed[0] if len(varmed) > 0 else 'N/A'}")
         print()
     
-    # Generate FBA-simulated dataset (parallel)
-    n_conditions = X.shape[0]
+    # Generate pFBA-simulated dataset (parallel)
+    n_conditions = len(varmed)
     total_simulations = size_i * n_conditions
     
     if verbose:
         print("-" * 80)
-        print("Step 3.2: Creating FBA-simulated dataset")
+        print("Step 3.2: Creating pFBA-simulated dataset")
         print("-" * 80)
-        print(f"Generating {size_i} samples x {n_conditions} conditions "
-              f"= {total_simulations} total FBA simulations")
+        print(f"Generating {size_i} samples x {n_conditions} unique medium combinations"
+              f"= {total_simulations} total pFBA simulations")
         print(f"Using {num_workers} parallel workers")
         print()
     
@@ -269,7 +281,7 @@ def create_reservoir_training_dataset(config):
         async_result = pool.map_async(_process_condition, worker_args)
         
         # Poll the progress
-        with tqdm(total=total_simulations, desc="FBA simulations", unit="sim") as pbar:
+        with tqdm(total=total_simulations, desc="pFBA simulations", unit="sim") as pbar:
             while not async_result.ready():
                 while not progress_queue.empty():
                     try:
@@ -338,7 +350,7 @@ def create_reservoir_training_dataset(config):
         print()
     
     # Save the training set
-    trainingfile = DATA_PROCESSED_DIR / f'{output_prefix}_{parameter.mediumbound}'
+    trainingfile = run_dir / f'{output_prefix}_{parameter.mediumbound}'
     
     if verbose:
         print(f"Saving training set to: {trainingfile}")
@@ -348,7 +360,7 @@ def create_reservoir_training_dataset(config):
     if verbose:
         print()
         print("=" * 80)
-        print("FBA-simulated training set generation complete!")
+        print("pFBA-simulated training set generation complete!")
         print("=" * 80)
         print(f"Output file: {trainingfile}.npz")
         print()
@@ -357,7 +369,7 @@ def create_reservoir_training_dataset(config):
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
-        description='Generate FBA-simulated training set for Reservoir AMN',
+        description='Generate pFBA-simulated training set for Reservoir AMN',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example:

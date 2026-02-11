@@ -13,7 +13,7 @@ from src.Build_Model import (
 )
 
 def print_stats(name, stats, elapsed_time=None):
-    """Print cross-validation or evaluation statistics in a clean format."""
+    """Print cross-validation statistics in a clean format."""
     header = f"--- Results: {name} "
     if elapsed_time is not None:
         header += f"(elapsed: {elapsed_time:.1f}s) "
@@ -27,6 +27,20 @@ def print_stats(name, stats, elapsed_time=None):
           f"(+/- {stats.test_objective[1]:.4f})  |  "
           f"Constraint = {stats.test_loss[0]:.6f} "
           f"(+/- {stats.test_loss[1]:.6f})")
+    print("-" * 72)
+
+
+def print_stats_eval(name, stats, elapsed_time=None):
+    """Print single dataset evaluation statistics.
+    Use this for evaluating on a hold-out test set or full dataset,
+    """
+    header = f"--- Evaluation: {name} "
+    if elapsed_time is not None:
+        header += f"(elapsed: {elapsed_time:.1f}s) "
+    header += "-" * max(0, 72 - len(header))
+    print(header)
+    print(f"  R2 = {stats.test_objective[0]:.4f}  |  "
+          f"Constraint = {stats.test_loss[0]:.6f}")
     print("-" * 72)
 
 
