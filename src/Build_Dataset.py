@@ -728,7 +728,8 @@ class TrainingSet:
         if not os.path.isfile(filename+'.npz'):
             print(filename+'.npz')
             sys.exit('file not found')
-        loaded = np.load(filename+'.npz')
+        # Use memory-mapped mode for loading of large arrays
+        loaded = np.load(filename+'.npz', mmap_mode='r')
         self.cobraname = str(loaded['cobraname'])
         self.reduce = str(loaded['reduce'])
         self.reduce = True if self.reduce == 'True' else False

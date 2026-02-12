@@ -1284,6 +1284,9 @@ def train_evaluate_model(parameter, verbose=False):
 
 class Neural_Model:
     # To save, load & print all kinds of models including reservoirs
+    # Class-level cache for loaded training parameters
+    _parameter_cache = {}
+    
     def __init__(self,
                  trainingfile=None, # training set parameter file
                  objective=None,
@@ -1339,10 +1342,25 @@ class Neural_Model:
         if not os.path.isfile(self.trainingfile+'.npz'):
             print(self.trainingfile+'.npz')
             sys.exit('parameter file not found')
-        parameter = TrainingSet()
-        parameter.load(self.trainingfile)
-        if self.objective:
-            parameter.filter_measure(measure=self.objective, verbose=verbose)
+        
+        # Create cache key combining filename and objective
+        cache_key = (self.trainingfile, tuple(self.objective) if self.objective else None)
+        
+        # Check if parameters are already cached
+        if cache_key in Neural_Model._parameter_cache:
+            if verbose:
+                print(f"Loading parameters from cache: {self.trainingfile}")
+            parameter = Neural_Model._parameter_cache[cache_key]
+        else:
+            if verbose:
+                print(f"Loading parameters from disk: {self.trainingfile}")
+            parameter = TrainingSet()
+            parameter.load(self.trainingfile)
+            if self.objective:
+                parameter.filter_measure(measure=self.objective, verbose=verbose)
+            # Cache the loaded parameter
+            Neural_Model._parameter_cache[cache_key] = parameter
+        
         self.Yall = parameter.Yall if self.objective else None
         self.mediumbound = parameter.mediumbound
         self.levmed = parameter.levmed
@@ -1413,7 +1431,7 @@ class Neural_Model:
             with open(json, "w") as json_file:
                 json_file.write(model_json)
             json_file.close()
-        self.model.save(filemodel)
+        self.model.save(filemodel.replace('.h5', '.keras'))
 
 
     def load(self, filename, verbose=False):
@@ -1491,6 +1509,7 @@ class Neural_Model:
             self.model = model
             # print("loaded")
         else:
+            filemodel = filename + "_model.keras"  # instead of .h5
             self.model = load_model(filemodel, compile=False)
             
         if pbar: 
@@ -1530,6 +1549,20 @@ class Neural_Model:
             print('training early stopping:', self.es)
         if filename != '':
             sys.stdout.close()
+    
+    @classmethod
+    def clear_parameter_cache(cls, trainingfile=None):
+        """Clear the parameter cache. If trainingfile is provided, only clear that entry.
+        Otherwise, clear the entire cache."""
+        if trainingfile is not None:
+            # Clear specific entries for this trainingfile
+            keys_to_remove = [k for k in cls._parameter_cache if k[0] == trainingfile]
+            for key in keys_to_remove:
+                del cls._parameter_cache[key]
+        else:
+            # Clear entire cache
+            cls._parameter_cache.clear()
+        return len(cls._parameter_cache)
 
 class RC_Model:
     # To save, load & print RC models
