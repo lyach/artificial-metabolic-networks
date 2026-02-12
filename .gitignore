@@ -30,3 +30,4 @@ data/processed/*
 # Slurm 
 scripts/slurm/*
 logs/*
+models/*

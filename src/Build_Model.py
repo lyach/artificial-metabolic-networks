@@ -1374,7 +1374,7 @@ class Neural_Model:
         print(fileparam)
         filemodel = filename + "_model.h5"
 
-        # Ensure output directory exists (open/save won't create parent folders)
+        # Ensure output directory exists
         out_paths = [fileparam, filemodel]
         if self.model_type == "AMN_LP":
             out_paths.append(filename + "_model.json")
