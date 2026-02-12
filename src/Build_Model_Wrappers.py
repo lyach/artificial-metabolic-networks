@@ -124,10 +124,6 @@ def train_evaluate_with_logging(parameter, result_dir, prefix, verbose=True):
     - Saves everything to CSVs in result_dir
     - Prints clean progress (fold number, shapes, R2/Q2 per fold)
     
-    Uses verbose=True for library calls (prints dimensions and shapes)
-    but avoids verbose=2 (which prints full Keras model summaries 
-    and per-epoch progress bars).
-    
     Parameters
     ----------
     parameter : Neural_Model or RC_Model
@@ -143,8 +139,6 @@ def train_evaluate_with_logging(parameter, result_dir, prefix, verbose=True):
     -------
     best_model : Neural_Model
         The model with highest Q2 on its test fold.
-    collated_pred : np.ndarray
-        Collated out-of-fold predictions for the entire dataset.
     stats : ReturnStats
         Aggregated cross-validation statistics.
     fold_records : list[dict]
@@ -230,10 +224,5 @@ def train_evaluate_with_logging(parameter, result_dir, prefix, verbose=True):
     save_fold_metrics(fold_records, result_dir, prefix)
     save_fold_predictions(fold_records, result_dir, prefix)
     save_fold_histories(histories, result_dir, prefix)
-
-    # Save collated predictions
-    collated_path = os.path.join(result_dir, f'{prefix}_collated_predictions.csv')
-    np.savetxt(collated_path, Ypred, delimiter=',')
-    print(f"  Saved collated predictions to {collated_path}")
 
     return Netmax, Ypred, stats, fold_records
