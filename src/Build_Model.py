@@ -54,10 +54,11 @@ from keras.callbacks import EarlyStopping
 from tqdm.auto import tqdm
 
 from sklearn import linear_model
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, KFold, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import KBinsDiscretizer
 
 import matplotlib.pyplot as plt
 import os
@@ -115,6 +116,47 @@ def CROP(dimension, start, end):
         if dimension == 4:
             return x[:, :, :, :, start: end]
     return Lambda(func)
+
+def get_stratified_kfold(Y, n_splits, n_bins=10, shuffle=True, random_state=None):
+    """
+    Create StratifiedKFold for continuous target values by binning Y into quantiles.
+    
+    Args:
+        Y: Target array (continuous values). If 2D, uses first column or mean.
+        n_splits: Number of folds for cross-validation.
+        n_bins: Number of quantile bins for stratification. 
+                Will be reduced if fewer unique values exist.
+        shuffle: Whether to shuffle the data before splitting.
+        random_state: Random seed for reproducibility.
+    
+    Returns:
+        StratifiedKFold object and binned labels for splitting.
+    """
+    # Handle 2D Y arrays - use mean across columns or first column
+    if len(Y.shape) > 1 and Y.shape[1] > 1:
+        y_for_binning = np.mean(Y, axis=1)
+    elif len(Y.shape) > 1:
+        y_for_binning = Y.flatten()
+    else:
+        y_for_binning = Y
+    
+    # Determine actual number of bins (can't exceed unique values)
+    n_unique = len(np.unique(y_for_binning))
+    actual_bins = min(n_bins, n_unique, len(y_for_binning) // n_splits)
+    actual_bins = max(actual_bins, 2)  # At least 2 bins
+    
+    # Bin continuous values into quantiles for stratification
+    try:
+        discretizer = KBinsDiscretizer(n_bins=actual_bins, encode='ordinal', 
+                                       strategy='quantile', subsample=None)
+        y_binned = discretizer.fit_transform(y_for_binning.reshape(-1, 1)).flatten().astype(int)
+    except ValueError:
+        # Fallback: use simple percentile-based binning if KBinsDiscretizer fails
+        percentiles = np.percentile(y_for_binning, np.linspace(0, 100, actual_bins + 1))
+        y_binned = np.digitize(y_for_binning, percentiles[1:-1])
+    
+    skfold = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+    return skfold, y_binned
 
 ###############################################################################
 # Custom Loss functions to evaluate models and compute gradients
@@ -1211,17 +1253,20 @@ def train_model(parameter, Xtrain, Ytrain, Xtest, Ytest, verbose=False):
     
     return Net, ytrain, ytest, otrain, ltrain, otest, ltest, history
            
-def train_evaluate_model(parameter, verbose=False):
+def train_evaluate_model(parameter, stratify=False, stratify_bins=10, verbose=False):
     # A standard function to create a model, fit, and Kflod cross validate
     # with early stopping
     # Kfold is performed for param.xfold test sets (if param.niter = 0)
     # otherwise only for niter test sets
-    # Inptuts:
+    # Inputs:
     # - all necessary parameter including
     #   parameter.model, the function used to create the model
     #   parameter.input_model, the function used to shape the model inputs
     #   parameter.X and parameter.Y, the dataset
     #   parameter.regression (boolean) if false classification
+    # - stratify: if True, use StratifiedKFold based on binned Y values
+    #   This ensures each fold has similar distribution of target values
+    # - stratify_bins: number of quantile bins for stratification (default 10)
     # Outputs:
     # - the best model (highest Q2/Acc on kfold test sets)
     # - the values predicted for each fold (if param.niter = 0)
@@ -1246,9 +1291,20 @@ def train_evaluate_model(parameter, verbose=False):
     # Cross-validation loop
     Otrain, Otest, Ltrain, Ltest, Omax, Netmax, Ypred = \
     [], [], [], [], -1.0e32, None, np.copy(Y)
-    kfold = KFold(n_splits=param.xfold, shuffle=True)
+    
+    # Choose between stratified or regular K-Fold
+    if stratify:
+        kfold, y_binned = get_stratified_kfold(Y, n_splits=param.xfold, 
+                                                n_bins=stratify_bins, shuffle=True)
+        split_iterator = kfold.split(X, y_binned)
+        if verbose:
+            print(f'Using StratifiedKFold with {param.xfold} folds and {stratify_bins} bins')
+    else:
+        kfold = KFold(n_splits=param.xfold, shuffle=True)
+        split_iterator = kfold.split(X, Y)
+    
     kiter = 0
-    for train, test in kfold.split(X, Y):
+    for train, test in split_iterator:
         if verbose: print('-------train', train, X[train].shape, Y[train].shape)
         if verbose: print('-------test ', test, X[test].shape, Y[test].shape)
         Net, ytrain, ytest, otrain, ltrain, otest, ltest, history = \
@@ -1583,6 +1639,7 @@ class RC_Model:
                  regression=True, 
                  epochs=0, train_rate=1e-3, dropout=0.25, batch_size=5,
                  niter=0, xfold=5, # cross validation 
+                 stratify=False, stratify_bins=10, # stratified CV for continuous Y
                  es=False, # early stopping
                  verbose=False
                 ):
@@ -1605,6 +1662,8 @@ class RC_Model:
         self.batch_size = batch_size
         self.niter = niter
         self.xfold = xfold
+        self.stratify = stratify
+        self.stratify_bins = stratify_bins
         self.es = es
         
         # Create reservoir
@@ -1672,6 +1731,9 @@ class RC_Model:
             print('RC training batch size:', self.batch_size)
             print('RC training validation iter:', self.niter)
             print('RC training xfold:', self.xfold)
+            print('RC training stratify:', self.stratify)
+            if self.stratify:
+                print('RC training stratify_bins:', self.stratify_bins)
             print('RC training early stopping:', self.es)
         if self.prior:
             print('--------prior network --------')

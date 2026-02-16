@@ -9,7 +9,8 @@ import pandas as pd
 from sklearn.model_selection import KFold
 
 from src.Build_Model import (
-    model_input, train_model, evaluate_model, ReturnStats
+    model_input, train_model, evaluate_model, ReturnStats,
+    get_stratified_kfold
 )
 
 def print_stats(name, stats, elapsed_time=None):
@@ -116,7 +117,8 @@ def save_fold_metrics(fold_records, result_dir, prefix):
     return df
 
 
-def train_evaluate_with_logging(parameter, result_dir, prefix, verbose=True):
+def train_evaluate_with_logging(parameter, result_dir, prefix, 
+                                 stratify=False, stratify_bins=10, verbose=True):
     """
     Custom cross-validation wrapper that:
     - Calls the library's train_model and evaluate_model per fold
@@ -132,6 +134,11 @@ def train_evaluate_with_logging(parameter, result_dir, prefix, verbose=True):
         Directory to save result CSVs.
     prefix : str
         Filename prefix for saved CSVs.
+    stratify : bool
+        If True, use StratifiedKFold based on binned Y values.
+        This ensures each fold has similar distribution of target values.
+    stratify_bins : int
+        Number of quantile bins for stratification (default 10).
     verbose : bool or int
         Verbosity level. True prints fold info and shapes.
     
@@ -162,8 +169,18 @@ def train_evaluate_with_logging(parameter, result_dir, prefix, verbose=True):
     fold_records = []
     histories = []
 
-    kfold = KFold(n_splits=param.xfold, shuffle=True)
-    for fold_idx, (train_idx, test_idx) in enumerate(kfold.split(X, Y)):
+    # Choose between stratified or regular K-Fold
+    if stratify:
+        kfold, y_binned = get_stratified_kfold(Y, n_splits=param.xfold, 
+                                                n_bins=stratify_bins, shuffle=True)
+        split_iterator = kfold.split(X, y_binned)
+        if verbose:
+            print(f"  Using StratifiedKFold with {param.xfold} folds and {stratify_bins} bins")
+    else:
+        kfold = KFold(n_splits=param.xfold, shuffle=True)
+        split_iterator = kfold.split(X, Y)
+    
+    for fold_idx, (train_idx, test_idx) in enumerate(split_iterator):
         print(f"\n  Fold {fold_idx + 1}/{param.xfold}: "
               f"train {X[train_idx].shape}, test {X[test_idx].shape}")
 

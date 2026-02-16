@@ -103,6 +103,9 @@ def train_eval_reservoir(config):
     xfold = config['xfold']
     batch_size = config['batch_size']
     es = config['es']
+    # Stratified CV parameters (optional, default to False)
+    stratify = config.get('stratify', False)
+    stratify_bins = config.get('stratify_bins', 10)
     
     # Set random seed
     np.random.seed(seed=seed)
@@ -142,6 +145,9 @@ def train_eval_reservoir(config):
             print(f"  Hidden dimension: {hidden_dim}")
             print(f"  Epochs: {epochs}")
             print(f"  Cross-validation folds: {xfold}")
+            print(f"  Stratified CV: {stratify}")
+            if stratify:
+                print(f"  Stratify bins: {stratify_bins}")
             print(f"  Batch size: {batch_size}")
             print(f"  Early stopping: {es}")
             print(f"  Console log file: {log_filepath}")
@@ -215,7 +221,8 @@ def train_eval_reservoir(config):
         start_time = time.time()
         model.X, model.Y = Xtrain, Ytrain
         reservoir, pred, stats, fold_records = train_evaluate_with_logging(
-            model, result_dir=result_dir, prefix='cv', verbose=verbose
+            model, result_dir=result_dir, prefix='cv', 
+            stratify=stratify, stratify_bins=stratify_bins, verbose=verbose
         )
         delta_time = time.time() - start_time
         

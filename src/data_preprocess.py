@@ -4,6 +4,7 @@ from pathlib import Path
 import cobra 
 import pandas as pd
 import numpy as np
+
 # ==== STEP 1: Create supplementary mapping CSV ====
 
 def create_supplementary_csv(model: cobra.Model, output_dir: Path) -> Path:
@@ -248,6 +249,9 @@ def match_amns_media(amns_dir: Path, output_dir: Path, final_df: pd.DataFrame) -
     # Keep only unique condition IDs
     corrected_df = corrected_df.drop_duplicates(subset=["Condition ID"])
     
+    # Save dataframe with condition IDs
+    corrected_df.to_csv(output_dir / "aidaying_media_growth.csv", index=False)
+    
     # Rename growth column
     corrected_df.rename(columns={"avg_growth": "GR_AVG"}, inplace=True)
     
@@ -276,10 +280,10 @@ def match_amns_media(amns_dir: Path, output_dir: Path, final_df: pd.DataFrame) -
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=Path, default=Path("data/raw/gems/iml1515.xml"))
-    parser.add_argument("--aida_dir", type=Path, default=Path("data/raw/ecoli_aida_dataset"))
-    parser.add_argument("--amns_dir", type=Path, default=Path("data/processed/amns"))
-    parser.add_argument("--output_dir", type=Path, default=Path("data/processed/ecoli_aida_dataset"))
+    parser.add_argument("--model_path", type=Path, default=Path("data/raw/iML1515.xml"))
+    parser.add_argument("--aida_dir", type=Path, default=Path("data/external"))
+    parser.add_argument("--amns_dir", type=Path, default=Path("data/interim"))
+    parser.add_argument("--output_dir", type=Path, default=Path("data/interim"))
     args = parser.parse_args()
  
     print(f"Loading GEM → {args.model_path}")
