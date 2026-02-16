@@ -16,6 +16,7 @@ import argparse
 import time
 import os
 from pathlib import Path
+from datetime import datetime
 
 # Suppress TensorFlow/XLA warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -49,6 +50,25 @@ from src.Build_Model_Wrappers import (
 
 
 # Configuration & main logic
+
+class TeeOutput:
+    """Class to redirect output to both console and file."""
+    def __init__(self, filepath):
+        self.terminal = sys.stdout
+        self.log = open(filepath, 'w')
+    
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()  # Ensure immediate write to file
+    
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+    
+    def close(self):
+        self.log.close()
+
 
 def load_config(config_path):
     """Load configuration from YAML file."""
@@ -87,148 +107,168 @@ def train_eval_reservoir(config):
     # Set random seed
     np.random.seed(seed=seed)
     
-    if verbose:
-        print("=" * 80)
-        print("Step 4: Build Artificial Metabolic Network (AMN) Reservoir")
-        print("=" * 80)
-        print(f"\nConfiguration:")
-        print(f"  Seed: {seed}")
-        print(f"  Test ratio: {ratio_test}")
-        print(f"  Reservoir name: {reservoirname}")
-        print(f"  Training file: {trainingfile_name}")
-        print(f"  Objective: {objective}")
-        print(f"  Model type: {model_type}")
-        print(f"  Timestep: {timestep}")
-        print(f"  Learning rate: {learn_rate}")
-        print(f"  Scaler: {scaler}")
-        print(f"  Hidden layers: {n_hidden}")
-        print(f"  Hidden dimension: {hidden_dim}")
-        print(f"  Epochs: {epochs}")
-        print(f"  Cross-validation folds: {xfold}")
-        print(f"  Batch size: {batch_size}")
-        print(f"  Early stopping: {es}")
-        print()
-    
-    # Build training file path
-    trainingfile = DATA_PROCESSED_DIR / trainingfile_name
-    trainingfile = str(trainingfile)
-    
-    if verbose:
-        print("-" * 80)
-        print("Step 4.1: Create Neural Model")
-        print("-" * 80)
-    
-    # Create model
-    model = Neural_Model(
-        trainingfile=trainingfile,
-        objective=objective,
-        model_type=model_type,
-        timestep=timestep,
-        learn_rate=learn_rate,
-        scaler=scaler,
-        n_hidden=n_hidden,
-        hidden_dim=hidden_dim,
-        epochs=epochs,
-        xfold=xfold,
-        batch_size=batch_size,
-        es=es,
-        verbose=verbose,
-    )
-    
-    # Split training and test set using ratio_test
-    if verbose:
-        print("-" * 80)
-        print("Step 4.2: Split training and test sets")
-        print("-" * 80)
-    
-    ID = np.random.choice(
-        model.X.shape[0],
-        size=int(model.X.shape[0] * ratio_test),
-        replace=False
-    )
-    Xtest, Ytest = model.X[ID, :], model.Y[ID, :]
-    Xtrain, Ytrain = np.delete(model.X, ID, axis=0), np.delete(model.Y, ID, axis=0)
-    
-    if verbose:
-        print(f"  Total samples: {model.X.shape[0]}")
-        print(f"  Training samples: {Xtrain.shape[0]}")
-        print(f"  Test samples: {Xtest.shape[0]}")
-        print()
-        model.printout()
-    
-    # Define output paths
-    reservoir_out = reservoirname + '_' + model.model_type
+    # Set up console output logging early (before any prints)
+    # Create result directory first
+    reservoir_out = reservoirname + '_' + model_type
     model_dir = MODELS_DIR / reservoir_out
-    reservoir_dir = model_dir / 'reservoir'
     result_dir = model_dir / 'result'
-    reservoirfile = str(reservoir_dir / reservoir_out)
-    
-    # Ensure directories exist
-    reservoir_dir.mkdir(parents=True, exist_ok=True)
     result_dir.mkdir(parents=True, exist_ok=True)
-    result_dir = str(result_dir)
     
-    if verbose:
-        print("-" * 80)
-        print("Step 4.3: Train and evaluate with cross-validation")
-        print("-" * 80)
-        print(f"  Reservoir name: {reservoir_out}")
-        print(f"  Reservoir file: {reservoirfile}")
-        print(f"  Result directory: {result_dir}")
-        print()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"console_log_{timestamp}.txt"
+    log_filepath = os.path.join(str(result_dir), log_filename)
     
-    # Train and evaluate with per-fold logging
-    start_time = time.time()
-    model.X, model.Y = Xtrain, Ytrain
-    reservoir, pred, stats, fold_records = train_evaluate_with_logging(
-        model, result_dir=result_dir, prefix='cv', verbose=verbose
-    )
-    delta_time = time.time() - start_time
+    # Redirect stdout to both console and file
+    original_stdout = sys.stdout
+    tee = TeeOutput(log_filepath)
+    sys.stdout = tee
     
-    # Print aggregated cross-validation results
-    print_stats(reservoirname, stats, delta_time)
-    
-    # Save reservoir model
-    reservoir.save(reservoirfile)
-    
-    if verbose:
-        print()
-        print("-" * 80)
-        print("Step 4.4: Print reservoir model info")
-        print("-" * 80)
-        reservoir.printout()
-    
-    # Run independent test set
-    if len(Xtest) > 0:
+    try:
+        if verbose:
+            print("=" * 80)
+            print("Step 4: Build Artificial Metabolic Network (AMN) Reservoir")
+            print("=" * 80)
+            print(f"\nConfiguration:")
+            print(f"  Seed: {seed}")
+            print(f"  Test ratio: {ratio_test}")
+            print(f"  Reservoir name: {reservoirname}")
+            print(f"  Training file: {trainingfile_name}")
+            print(f"  Objective: {objective}")
+            print(f"  Model type: {model_type}")
+            print(f"  Timestep: {timestep}")
+            print(f"  Learning rate: {learn_rate}")
+            print(f"  Scaler: {scaler}")
+            print(f"  Hidden layers: {n_hidden}")
+            print(f"  Hidden dimension: {hidden_dim}")
+            print(f"  Epochs: {epochs}")
+            print(f"  Cross-validation folds: {xfold}")
+            print(f"  Batch size: {batch_size}")
+            print(f"  Early stopping: {es}")
+            print(f"  Console log file: {log_filepath}")
+            print()
+        
+        # Build training file path
+        trainingfile = DATA_PROCESSED_DIR / trainingfile_name
+        trainingfile = str(trainingfile)
+        
+        if verbose:
+            print("-" * 80)
+            print("Step 4.1: Create Neural Model")
+            print("-" * 80)
+        
+        # Create model
+        model = Neural_Model(
+            trainingfile=trainingfile,
+            objective=objective,
+            model_type=model_type,
+            timestep=timestep,
+            learn_rate=learn_rate,
+            scaler=scaler,
+            n_hidden=n_hidden,
+            hidden_dim=hidden_dim,
+            epochs=epochs,
+            xfold=xfold,
+            batch_size=batch_size,
+            es=es,
+            verbose=verbose,
+        )
+        
+        # Split training and test set using ratio_test
+        if verbose:
+            print("-" * 80)
+            print("Step 4.2: Split training and test sets")
+            print("-" * 80)
+        
+        ID = np.random.choice(
+            model.X.shape[0],
+            size=int(model.X.shape[0] * ratio_test),
+            replace=False
+        )
+        Xtest, Ytest = model.X[ID, :], model.Y[ID, :]
+        Xtrain, Ytrain = np.delete(model.X, ID, axis=0), np.delete(model.Y, ID, axis=0)
+        
+        if verbose:
+            print(f"  Total samples: {model.X.shape[0]}")
+            print(f"  Training samples: {Xtrain.shape[0]}")
+            print(f"  Test samples: {Xtest.shape[0]}")
+            print()
+            model.printout()
+        
+        # Define remaining output paths
+        reservoir_dir = model_dir / 'reservoir'
+        reservoirfile = str(reservoir_dir / reservoir_out)
+        
+        # Ensure reservoir directory exists
+        reservoir_dir.mkdir(parents=True, exist_ok=True)
+        result_dir = str(result_dir)
+        
+        if verbose:
+            print("-" * 80)
+            print("Step 4.3: Train and evaluate with cross-validation")
+            print("-" * 80)
+            print(f"  Reservoir name: {reservoir_out}")
+            print(f"  Reservoir file: {reservoirfile}")
+            print(f"  Result directory: {result_dir}")
+            print()
+        
+        # Train and evaluate with per-fold logging
+        start_time = time.time()
+        model.X, model.Y = Xtrain, Ytrain
+        reservoir, pred, stats, fold_records = train_evaluate_with_logging(
+            model, result_dir=result_dir, prefix='cv', verbose=verbose
+        )
+        delta_time = time.time() - start_time
+        
+        # Print aggregated cross-validation results
+        print_stats(reservoirname, stats, delta_time)
+        
+        # Save reservoir model
+        reservoir.save(reservoirfile)
+        
         if verbose:
             print()
             print("-" * 80)
-            print("Step 4.5: Evaluate on independent test set")
+            print("Step 4.4: Print reservoir model info")
             print("-" * 80)
+            reservoir.printout()
         
-        start_time = time.time()
-        reservoir.X, reservoir.Y = Xtest, Ytest
-        X_eval, Y_eval = model_input(reservoir, verbose=verbose)
-        pred_test, stats_test = evaluate_model(
-            reservoir.model, X_eval, Y_eval, reservoir, verbose=verbose
-        )
-        delta_time = time.time() - start_time
-        print_stats_eval('Independent test set', stats_test, delta_time)
+        # Run independent test set
+        if len(Xtest) > 0:
+            if verbose:
+                print()
+                print("-" * 80)
+                print("Step 4.5: Evaluate on independent test set")
+                print("-" * 80)
+            
+            start_time = time.time()
+            reservoir.X, reservoir.Y = Xtest, Ytest
+            X_eval, Y_eval = model_input(reservoir, verbose=verbose)
+            pred_test, stats_test = evaluate_model(
+                reservoir.model, X_eval, Y_eval, reservoir, verbose=verbose
+            )
+            delta_time = time.time() - start_time
+            print_stats_eval('Independent test set', stats_test, delta_time)
+            
+            # Save test set predictions
+            ensure_result_dir(result_dir)
+            test_pred_path = os.path.join(result_dir, 'test_set_predictions.csv')
+            np.savetxt(test_pred_path, pred_test, delimiter=',')
+            print(f"  Saved test predictions to {test_pred_path}")
         
-        # Save test set predictions
-        ensure_result_dir(result_dir)
-        test_pred_path = os.path.join(result_dir, 'test_set_predictions.csv')
-        np.savetxt(test_pred_path, pred_test, delimiter=',')
-        print(f"  Saved test predictions to {test_pred_path}")
+        if verbose:
+            print()
+            print("=" * 80)
+            print("AMN Reservoir training and evaluation complete!")
+            print("=" * 80)
+            print(f"Reservoir saved to: {reservoirfile}_param.csv")
+            print(f"Results saved to: {result_dir}/")
+            print(f"Console log saved to: {log_filepath}")
+            print()
     
-    if verbose:
-        print()
-        print("=" * 80)
-        print("AMN Reservoir training and evaluation complete!")
-        print("=" * 80)
-        print(f"Reservoir saved to: {reservoirfile}_param.csv")
-        print(f"Results saved to: {result_dir}/")
-        print()
+    finally:
+        # Restore original stdout and close log file
+        sys.stdout = original_stdout
+        tee.close()
 
 
 def main():
