@@ -1,0 +1,38 @@
+# Configuration for training and evaluating Ensemble model
+# (Media Network + AMN Reservoir)
+# This config is used by scripts/train_eval_ensemble.py
+
+# Number of seeds for repeated training
+# Multiple seeds provide robust performance estimates
+number_of_seeds: 3
+
+# Training dataset name (located in data/interim/)
+# This is the experimental media composition + growth rate dataset
+trainname: 'aidaying_media_growth_amns_padded'
+
+# Reservoir model name (located in models/)
+# This is the pre-trained AMN Reservoir from step 4
+reservoirname: 'aidaying_iml1515_UB_AMN_QP'
+
+# Number of input features (media compounds)
+n_input: 48
+
+# Prior network parameters (Media Network)
+# The prior network learns to predict uptake flux bounds from media compositions
+n_hidden_prior: 1       # Number of hidden layers
+hidden_dim_prior: 500   # Hidden layer dimension
+activation_prior: 'relu'  # Activation function
+
+# Training parameters
+epochs: 200             # Maximum training epochs
+train_rate: 1.0e-3      # Learning rate (Adam optimizer)
+batch_size: 128         # Training batch size
+xfold: 5                # Number of cross-validation folds
+es: true                # Enable early stopping
+
+# Stratified CV parameters
+stratify: true
+stratify_bins: 10       # Number of bins for stratification
+
+# Verbosity
+verbose: true           # Print progress information

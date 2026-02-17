@@ -1492,13 +1492,18 @@ class Neural_Model:
 
     def load(self, filename, verbose=False):
         fileparam = filename + "_param.csv"
-        filemodel = filename + "_model.h5"
+        filemodel_h5 = filename + "_model.h5"
+        filemodel_keras = filename + "_model.keras"
         if not os.path.isfile(fileparam):
             print(fileparam)
             sys.exit('parameter file not found')
-        if not os.path.isfile(filemodel):
-            print(filemodel)
-            sys.exit('model file not found')
+        if os.path.isfile(filemodel_h5):
+            filemodel = filemodel_h5
+        elif os.path.isfile(filemodel_keras):
+            filemodel = filemodel_keras
+        else:
+            print(filemodel_h5, "or", filemodel_keras)
+            sys.exit('model file not found (.h5 or .keras)')
             
         # Setup progress bar
         steps = ['Reading params', 'Loading matrices', 'Loading model']
@@ -1565,7 +1570,6 @@ class Neural_Model:
             self.model = model
             # print("loaded")
         else:
-            filemodel = filename + "_model.keras"  # instead of .h5
             self.model = load_model(filemodel, compile=False)
             
         if pbar: 
