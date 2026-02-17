@@ -1,0 +1,49 @@
+# Configuration for evaluating medium predictions with COBRApy
+# This config is used by scripts/evaluate_medium_pred.py
+
+# Random seed for reproducibility
+seed: 10
+
+# COBRA model name (located in data/raw/, without .xml extension)
+# This is the genome-scale metabolic model
+cobraname: 'iML1515'
+
+# Medium bound type: 'EB' (Exact Bound) or 'UB' (Upper Bound)
+mediumbound: 'UB'
+
+# Reservoir model name (located in models/)
+# This is the pre-trained AMN Reservoir from step 4
+reservoirname: 'aidaying_iml1515_UB_AMN_QP'
+
+# Prediction file name (located in models/<reservoirname>/result_medium/)
+# This is the output from the ensemble model (step 5)
+# Without .csv extension
+predfilename: 'pred_medium_seed1'
+
+# Number of medium compounds
+mediumsize: 48
+
+# Method for reading data: 'EXP' for experimental format
+method: 'EXP'
+
+# Simulation method for COBRApy: 'FBA', 'pFBA', or 'EXP'
+# pFBA (parsimonious FBA) minimizes total flux while achieving optimal objective
+method_simulation: 'pFBA'
+
+# Scaler values to evaluate
+# Medium fluxes are multiplied by these values before running COBRApy
+# Use multiple values to find the optimal scaling factor
+scaler_list:
+  - 1.0
+
+# Whether to use experimental data directly instead of predictions
+# If true, uses 'expname' from data/interim/
+# If false, uses 'predfilename' from models/<reservoirname>/result_medium/
+use_experimental: false
+
+# Experimental dataset name (used only if use_experimental is true)
+# Located in data/interim/, without .csv extension
+expname: 'aidaying_media_growth_amns_padded'
+
+# Verbosity
+verbose: true
