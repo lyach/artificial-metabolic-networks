@@ -212,6 +212,9 @@ def train_eval_ensemble(config):
         # Load training data
         X, Y = read_XY(trainingfile, n_input)
         
+        # Transform X to log10 scale
+        X = np.log10(1 + X)
+        
         if verbose:
             print(f"  Training data loaded: X shape = {X.shape}, Y shape = {Y.shape}")
             print()
