@@ -117,7 +117,7 @@ def save_seed_predictions(model, pred, seed, trainingfile, result_medium_dir, ve
     XY = np.concatenate((Vin, model.Y), axis=1)
     
     # Parse column names from training file (compounds + growth rate)
-    df_cols = pd.read_csv(trainingfile, nrows=0).columns
+    df_cols = pd.read_csv(trainingfile + '.csv', nrows=0).columns
     
     # Create a single string separated by commas for the CSV header
     header_string = ",".join(df_cols)
