@@ -24,6 +24,7 @@
 
 from src.Build_Dataset import *
 
+from pathlib import Path
 import keras
 import keras.backend as K
 import tensorflow as tf
@@ -1518,6 +1519,17 @@ class Neural_Model:
 
         # model architecture
         self.trainingfile =  str(K[0])
+        # If the stored trainingfile path is different from the current project root 
+        # (e.g. model was trained on a different machine)
+        if self.trainingfile and not os.path.isfile(self.trainingfile + '.npz'):
+            _current_root = str(Path(__file__).resolve().parents[1])
+            _stored = Path(self.trainingfile)
+            for _n in range(1, len(_stored.parts)):
+                _suffix = Path(*_stored.parts[_n:])
+                _candidate = Path(_current_root) / _suffix
+                if os.path.isfile(str(_candidate) + '.npz'):
+                    self.trainingfile = str(_candidate)
+                    break
         self.model_type =  str(K[1])
         self.objective =  str(K[2])
         self.scaler =  float(K[3])

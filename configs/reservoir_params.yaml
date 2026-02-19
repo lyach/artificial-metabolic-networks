@@ -29,7 +29,7 @@ n_hidden: 1           # Number of hidden layers
 hidden_dim: 50        # Hidden layer dimension
 
 # Training parameters
-epochs: 200           # Maximum training epochs
+epochs: 500           # Maximum training epochs
 xfold: 5              # Number of cross-validation folds
 batch_size: 128       # Training batch size
 es: true              # Enable early stopping
