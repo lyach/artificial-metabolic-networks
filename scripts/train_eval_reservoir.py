@@ -99,6 +99,8 @@ def train_eval_reservoir(config):
     scaler = config['scaler']
     n_hidden = config['n_hidden']
     hidden_dim = config['hidden_dim']
+    train_rate = config['train_rate']
+    dropout = config['dropout']
     epochs = config['epochs']
     xfold = config['xfold']
     batch_size = config['batch_size']
@@ -143,6 +145,8 @@ def train_eval_reservoir(config):
             print(f"  Scaler: {scaler}")
             print(f"  Hidden layers: {n_hidden}")
             print(f"  Hidden dimension: {hidden_dim}")
+            print(f"  Train rate: {train_rate}")
+            print(f"  Dropout: {dropout}")
             print(f"  Epochs: {epochs}")
             print(f"  Cross-validation folds: {xfold}")
             print(f"  Stratified CV: {stratify}")
@@ -172,6 +176,8 @@ def train_eval_reservoir(config):
             scaler=scaler,
             n_hidden=n_hidden,
             hidden_dim=hidden_dim,
+            train_rate=train_rate,
+            dropout=dropout,
             epochs=epochs,
             xfold=xfold,
             batch_size=batch_size,
