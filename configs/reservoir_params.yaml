@@ -18,20 +18,23 @@ trainingfile: 'aidaying_iml1515_UB/aidaying_iml1515_UB'
 objective:
   - 'BIOMASS_Ec_iML1515_core_75p37M'
 
-# Model architecture parameters
+# Mechanistic layer parameters
 model_type: 'AMN_QP'  # Options: AMN_QP, AMN_LP, AMN_Wt, ANN_dense
-timestep: 4           # Number of gradient descent iterations
-learn_rate: 0.01      # Gradient descent learning rate
+timestep: 4           # Number of gradient descent iterations 
+learn_rate: 0.001     # For Mechanistic Layer 
 scaler: true          # Use input scaling
 
-# Neural network parameters
+# Neural layer parameters
 n_hidden: 1           # Number of hidden layers
-hidden_dim: 50        # Hidden layer dimension
+hidden_dim: 500       # Hidden layer dimension
+train_rate: 0.001     # For Neural Layer
+dropout: 0.25         # Regularization
+
 
 # Training parameters
 epochs: 500           # Maximum training epochs
 xfold: 5              # Number of cross-validation folds
-batch_size: 128       # Training batch size
+batch_size: 512       # Training batch size - optimized for H100 80GB
 es: true              # Enable early stopping
 
 # Verbosity
