@@ -24,9 +24,9 @@ hidden_dim_prior: 500   # Hidden layer dimension
 activation_prior: 'relu'  # Activation function
 
 # Training parameters
-epochs: 200             # Maximum training epochs
-train_rate: 1.0e-3      # Learning rate (Adam optimizer)
-batch_size: 128         # Training batch size
+epochs: 1000            # Maximum training epochs
+train_rate: 1.0e-4      # Learning rate (Adam optimizer)
+batch_size: 512         # Training batch size
 xfold: 5                # Number of cross-validation folds
 es: true                # Enable early stopping
 
