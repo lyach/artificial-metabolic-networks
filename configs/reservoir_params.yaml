@@ -21,13 +21,13 @@ objective:
 # Mechanistic layer parameters
 model_type: 'AMN_QP'  # Options: AMN_QP, AMN_LP, AMN_Wt, ANN_dense
 timestep: 4           # Number of gradient descent iterations 
-learn_rate: 0.001     # For Mechanistic Layer 
+learn_rate: 1         # For Mechanistic Layer GD
 scaler: true          # Use input scaling
 
 # Neural layer parameters
 n_hidden: 1           # Number of hidden layers
 hidden_dim: 500       # Hidden layer dimension
-train_rate: 0.001     # For Neural Layer
+train_rate: 1.0e-3    # For optimizer (Adam)
 dropout: 0.25         # Regularization
 
 
