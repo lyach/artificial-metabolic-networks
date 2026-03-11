@@ -731,6 +731,8 @@ class TrainingSet:
         # Use memory-mapped mode for loading of large arrays
         loaded = np.load(filename+'.npz', mmap_mode='r')
         self.cobraname = str(loaded['cobraname'])
+        if not os.path.isfile(self.cobraname + '.xml'):
+            self.cobraname = filename
         self.reduce = str(loaded['reduce'])
         self.reduce = True if self.reduce == 'True' else False
         self.mediumname = str(loaded['mediumname'])
