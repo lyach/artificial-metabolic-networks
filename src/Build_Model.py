@@ -347,6 +347,9 @@ def input_AMN(parameter, verbose=False):
     if parameter.scaler != 0: # Normalize X
         X, parameter.scaler = MaxScaler(X)                 
     if verbose: print('AMN scaler', parameter.scaler)
+    if getattr(parameter, 'y_scale', False):
+        Y, parameter.y_scaler = MaxScaler(Y)
+        if verbose: print('AMN Y scaler', parameter.y_scaler)
     y = np.zeros(Y.shape[0]).reshape(Y.shape[0],1)
     Y = np.concatenate((Y, y), axis=1) # SV constraint
     Y = np.concatenate((Y, y), axis=1) # Pin constraint
@@ -397,6 +400,9 @@ def output_AMN(V, Vin, V0, parameter, verbose=False):
 
     Pout     = tf.convert_to_tensor(np.float32(parameter.Pout))
     PoutV    = tf.linalg.matmul(V, tf.transpose(Pout), b_is_sparse=True)
+    y_scaler = getattr(parameter, 'y_scaler', 1.0)
+    if y_scaler not in (1.0, 1.0e12):
+        PoutV = PoutV / tf.constant(y_scaler, dtype=tf.float32)
     SV, _    = Loss_SV(V, parameter.S) # SV const
     PinV, _  = Loss_Vin(V, parameter.Pin, Vin, parameter.mediumbound, parameter) # Pin const
     Vpos, _  = Loss_Vpos(V, parameter) # V ≥ 0 const
@@ -1027,6 +1033,9 @@ def print_loss_evaluate(y_true, y_pred, Vin, parameter):
     nV = parameter.S.shape[1]
     Vf = y_pred[:,y_true.shape[1]:y_true.shape[1]+nV]
     Vout = y_true[:,:end]
+    y_scaler = getattr(parameter, 'y_scaler', 1.0)
+    if y_scaler not in (1.0, 1.0e12):
+        Vout = Vout * y_scaler
     if y_pred.shape[1] == y_true.shape[1]+nV+nV:
         V0 = y_pred[:,y_true.shape[1]+nV:y_true.shape[1]+nV+nV]
         loss_out0, _ = Loss_Vout(V0, parameter.Pout, Vout)
@@ -1359,6 +1368,7 @@ class Neural_Model:
                  epochs=0, train_rate=1e-3, dropout=0.25, batch_size=5,
                  niter=0, xfold=5, # Cross valisation LOO does not work
                  es=True, # early stopping
+                 y_scale=False, # scale Y (flux targets) by max
                  verbose=False,
                 ):
         # Create empty object
@@ -1370,6 +1380,8 @@ class Neural_Model:
         self.model_type = model_type
         self.objective = objective
         self.scaler = float(scaler) # From bool to float
+        self.y_scale = bool(y_scale)
+        self.y_scaler = 1.0
         self.input_dim = input_dim 
         self.output_dim = output_dim 
         self.n_hidden = n_hidden
@@ -1477,7 +1489,8 @@ class Neural_Model:
                     + str(self.batch_size) + ","\
                     + str(self.niter) + ","\
                     + str(self.xfold) + ","\
-                    + str(self.es)
+                    + str(self.es) + ","\
+                    + str(self.y_scaler)
         with open(fileparam, "w") as h:
             # print(s, file = h)
             h.write(s)
@@ -1551,6 +1564,8 @@ class Neural_Model:
         self.niter = int(K[17])
         self.xfold = int(K[18])
         self.es = True if K[19] == 'True' else False
+        self.y_scaler = float(K[20]) if len(K) > 20 else 1.0
+        self.y_scale = self.y_scaler not in (1.0, 1.0e12)
         # Make objective a list
         self.objective = self.objective.replace('[', '')
         self.objective = self.objective.replace(']', '')
@@ -1594,6 +1609,7 @@ class Neural_Model:
         print('training file:', self.trainingfile)
         print('model type:', self.model_type)
         print('model scaler:', self.scaler)
+        print('model y_scaler:', getattr(self, 'y_scaler', 1.0))
         print('model input dim:', self.input_dim)
         print('model output dim:', self.output_dim)
         print('model medium bound:', self.mediumbound)

@@ -1,0 +1,41 @@
+# Configuration for training and evaluating AMN Reservoir model
+# This config is used by scripts/train_eval_reservoir.py
+
+# Random seed for reproducibility
+seed: 10
+
+# Test set ratio (fraction of data held out for independent testing)
+ratio_test: 0.1
+
+# Reservoir identifier (used for naming outputs)
+reservoirname: 'iML1515'
+
+# Training dataset npz file path
+# This is the output from create_reservoir_training_dataset.py
+trainingfile: 'iML1515/iML1515_UB'
+
+# Model objective (list of reaction IDs to optimize)
+objective:
+  - 'BIOMASS_Ec_iML1515_core_75p37M'
+
+# Mechanistic layer parameters
+model_type: 'AMN_QP'  # Options: AMN_QP, AMN_LP, AMN_Wt, ANN_dense
+timestep: 4          # Number of gradient descent iterations 
+learn_rate: 0.01         # For Mechanistic Layer GD
+scaler: true          # Use input scaling
+
+# Neural layer parameters
+n_hidden: 1           # Number of hidden layers
+hidden_dim: 500        # Hidden layer dimension
+train_rate: 0.001    # For optimizer (Adam)
+dropout: 0.25         # Regularization
+
+
+# Training parameters
+epochs: 500          # Maximum training epochs
+xfold: 5              # Number of cross-validation folds
+batch_size: 512       # Training batch size - optimized for H100 80GB
+es: true             # Enable early stopping
+
+# Verbosity
+verbose: true         # Print progress information

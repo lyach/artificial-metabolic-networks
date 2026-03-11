@@ -105,6 +105,7 @@ def train_eval_reservoir(config):
     xfold = config['xfold']
     batch_size = config['batch_size']
     es = config['es']
+    y_scale = config.get('y_scale', False)
     # Stratified CV parameters (optional, default to False)
     stratify = config.get('stratify', False)
     stratify_bins = config.get('stratify_bins', 10)
@@ -154,6 +155,7 @@ def train_eval_reservoir(config):
                 print(f"  Stratify bins: {stratify_bins}")
             print(f"  Batch size: {batch_size}")
             print(f"  Early stopping: {es}")
+            print(f"  Y scaling: {y_scale}")
             print(f"  Console log file: {log_filepath}")
             print()
         
@@ -182,9 +184,17 @@ def train_eval_reservoir(config):
             xfold=xfold,
             batch_size=batch_size,
             es=es,
+            y_scale=y_scale,
             verbose=verbose,
         )
         
+        # Remove zero-biomass samples from the entire dataset before splitting.
+        # Zero-growth conditions add noise and distort the V scaler.
+        nonzero_mask = model.Y.flatten() > 0
+        n_removed = int(np.sum(~nonzero_mask))
+        model.X = model.X[nonzero_mask]
+        model.Y = model.Y[nonzero_mask]
+
         # Split training and test set using ratio_test
         if verbose:
             print("-" * 80)
@@ -198,9 +208,10 @@ def train_eval_reservoir(config):
         )
         Xtest, Ytest = model.X[ID, :], model.Y[ID, :]
         Xtrain, Ytrain = np.delete(model.X, ID, axis=0), np.delete(model.Y, ID, axis=0)
-        
+
         if verbose:
-            print(f"  Total samples: {model.X.shape[0]}")
+            print(f"  Original samples: {n_removed + model.X.shape[0]} "
+                  f"(removed {n_removed} zero-biomass)")
             print(f"  Training samples: {Xtrain.shape[0]}")
             print(f"  Test samples: {Xtest.shape[0]}")
             print()
