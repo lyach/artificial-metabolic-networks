@@ -21,7 +21,7 @@ objective:
 # Mechanistic layer parameters
 model_type: 'AMN_QP'  # Options: AMN_QP, AMN_LP, AMN_Wt, ANN_dense
 timestep: 4           # Number of gradient descent iterations 
-learn_rate: 0.001         # For Mechanistic Layer GD
+learn_rate: 1         # For Mechanistic Layer GD
 scaler: true          # Use input scaling
 
 # Neural layer parameters
@@ -35,7 +35,7 @@ dropout: 0.25         # Regularization
 epochs: 1000          # Maximum training epochs
 xfold: 5              # Number of cross-validation folds
 batch_size: 512       # Training batch size - optimized for H100 80GB
-es: false             # Enable early stopping
+es: true             # Enable early stopping
 
 # Verbosity
 verbose: true         # Print progress information
