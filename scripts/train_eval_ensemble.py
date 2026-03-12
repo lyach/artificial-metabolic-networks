@@ -113,7 +113,16 @@ def save_seed_predictions(model, pred, seed, trainingfile, result_medium_dir, ve
     # Extract V and Vin
     V = pred[:, 4:4 + model.S.shape[1]]
     Vin_pre_scaling = pred[:, 4 + model.S.shape[1]:]
-    Vin = model.res.scaler * Vin_pre_scaling  # rescale back for Cobra
+    if getattr(model.res, 'per_feature_norm', False):
+        col_max = np.max(model.res.X, axis=0)
+        col_max[col_max == 0] = 1.0
+        scaler = np.ones_like(col_max)
+        for i, lev in enumerate(model.res.levmed):
+            if lev == 1:
+                scaler[i] = col_max[i]
+        Vin = scaler * Vin_pre_scaling
+    else:
+        Vin = model.res.scaler * Vin_pre_scaling
     XY = np.concatenate((Vin, model.Y), axis=1)
     
     # Parse column names from training file (compounds + growth rate)
@@ -212,11 +221,34 @@ def train_eval_ensemble(config):
         # Load training data
         X, Y = read_XY(trainingfile, n_input)
         
+        # Reorder X columns to match the reservoir's medium ordering
+        # The experimental CSV may have a different column order
+        exp_cols = pd.read_csv(trainingfile + '.csv', nrows=0).columns[:n_input].tolist()
+        res_npz_path = str(MODELS_DIR / reservoirname / 'reservoir' / reservoirname)
+        # The reservoir stores its trainingfile path; load the npz to get medium order
+        res_param_csv = res_npz_path + '_param.csv'
+        with open(res_param_csv, 'r') as f:
+            res_trainingfile = f.readline().rstrip().split(',')[0]
+        if not os.path.isfile(res_trainingfile + '.npz'):
+            from pathlib import Path as _P
+            for _n in range(1, len(_P(res_trainingfile).parts)):
+                _suffix = _P(*_P(res_trainingfile).parts[_n:])
+                _candidate = PROJECT_ROOT / _suffix
+                if os.path.isfile(str(_candidate) + '.npz'):
+                    res_trainingfile = str(_candidate)
+                    break
+        res_npz = np.load(res_trainingfile + '.npz', allow_pickle=True)
+        res_medium = list(res_npz['medium'])
+        perm = [exp_cols.index(m) for m in res_medium]
+        X = X[:, perm]
+        
         # Transform X to log10 scale
         X = np.log10(1 + X)
         
         if verbose:
+            reordered = (perm != list(range(len(perm))))
             print(f"  Training data loaded: X shape = {X.shape}, Y shape = {Y.shape}")
+            print(f"  Columns reordered to match reservoir: {reordered}")
             print()
         
         # Initialize storage for results across seeds

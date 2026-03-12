@@ -950,31 +950,54 @@ def RC(parameter, verbose=False):
     inputs, L  = Input(shape=(parameter.input_dim,)), 0
     if parameter.prior:
         if parameter.res.mediumbound == 'UB':
-            L = inputs.shape[1] - parameter.prior.input_dim
-            Res_inputs = CROP(1, 0, L) (inputs) # minmed
-            Prior_inputs = CROP(1, L, inputs.shape[1]) (inputs) # varmed
+            fixed_idx = [i for i, lev in enumerate(parameter.res.levmed)
+                         if lev == 1]
+            var_idx = [i for i, lev in enumerate(parameter.res.levmed)
+                       if lev > 1]
+            L = len(fixed_idx)
+            Res_fixed = tf.gather(inputs, fixed_idx, axis=1)
+            Prior_inputs = tf.gather(inputs, var_idx, axis=1)
         else: # L=0
             Prior_inputs = inputs
         Prior_outputs = Dense_layers(Prior_inputs, parameter.prior, 
                                      trainable=True, verbose=verbose)
         if verbose:
             print('Prior inputs and outputs', Prior_inputs.shape, Prior_outputs.shape)
-            print('Res inputs added to Prior_outputs', L)
+            print('Res fixed features', L)
     else:
         Prior_outputs = inputs
 
     # Reservoir
-    # 1. Add to Res_inputs the fixed part of input 
-    # 2. Mask in Res_inputs all zero elements in inputs
-    # 3. Call (non trainable) reservoir 
-    # 4. Get for forward passing the loss on constraints
-    Res_inputs = concatenate([Res_inputs, Prior_outputs], axis=1) \
-    if L > 0 else Prior_outputs
+    # 1. Combine fixed features with prior outputs
+    # 2. Scatter back to reservoir medium ordering
+    # 3. Mask zero elements and normalize
+    # 4. Call (non trainable) reservoir
+    if L > 0:
+        combined = concatenate([Res_fixed, Prior_outputs], axis=1)
+        unsort = [0] * len(parameter.res.levmed)
+        fi, vi = 0, L
+        for i in range(len(parameter.res.levmed)):
+            if parameter.res.levmed[i] == 1:
+                unsort[i] = fi; fi += 1
+            else:
+                unsort[i] = vi; vi += 1
+        Res_inputs = tf.gather(combined, unsort, axis=1)
+    else:
+        Res_inputs = Prior_outputs
     # O/1 mask
     inputs_mask = tf.math.divide_no_nan(inputs, inputs) 
     Res_inputs = tf.math.multiply(Res_inputs, inputs_mask)
     # Res inputs is scaled to fit training data
-    if parameter.res.scaler != 0:
+    if getattr(parameter.res, 'per_feature_norm', False):
+        col_max = np.max(parameter.res.X, axis=0)
+        col_max[col_max == 0] = 1.0
+        scaler = np.ones_like(col_max)
+        for i, lev in enumerate(parameter.res.levmed):
+            if lev == 1:
+                scaler[i] = col_max[i]
+        Res_inputs = Res_inputs / tf.constant(
+            scaler.reshape(1, -1), dtype=tf.float32)
+    elif parameter.res.scaler != 0:
         Res_inputs = Res_inputs / parameter.res.scaler
     if verbose: print('Res inputs (final)', Res_inputs.shape)
     # Run reservoir
