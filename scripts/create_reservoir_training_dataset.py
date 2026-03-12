@@ -43,7 +43,8 @@ _worker_params = None
 
 
 def _init_worker(cobrafile, objective, medium, mediumbound,
-                 levmed, valmed, ratmed, method):
+                 levmed, valmed, ratmed, method,
+                 cobra_min_objective, max_varmed_scale):
     """
     Pool initializer: each worker process loads its own COBRA model
     and caches shared parameters to avoid repeated serialization.
@@ -64,6 +65,8 @@ def _init_worker(cobrafile, objective, medium, mediumbound,
         'valmed': list(valmed),
         'ratmed': float(ratmed),
         'method': str(method),
+        'cobra_min_objective': float(cobra_min_objective),
+        'max_varmed_scale': max_varmed_scale,
     }
 
 
@@ -101,6 +104,8 @@ def _process_condition(args):
                 None,  # Pout (E parameter) — unused inside get_io_cobra
                 method=_worker_params['method'],
                 verbose=False,
+                cobra_min_objective=_worker_params['cobra_min_objective'],
+                max_varmed_scale=_worker_params['max_varmed_scale'],
             )
             # Report progress after each simulation
             if progress_queue is not None:
@@ -145,6 +150,9 @@ def create_reservoir_training_dataset(config):
     mediumfile = config['mediumfile']
     output_prefix = config['output_prefix']
     num_workers = config.get('num_workers', 1)
+    cobra_min_objective = config.get('cobra_min_objective', 0.01)
+    max_varmed_scale = config.get('max_varmed_scale', 5) if config.get('cap_varmed', False) else None
+    biomass_threshold = config.get('biomass_threshold', 0.01) if config.get('filter_zero_biomass', False) else None
     
     # Use run ID from config or generate a unique one
     run_id = config.get('run_id', uuid.uuid4().hex[:8])
@@ -170,6 +178,9 @@ def create_reservoir_training_dataset(config):
         print(f"  Medium parameters file: {mediumfile}")
         print(f"  Output prefix: {output_prefix}")
         print(f"  Parallel workers: {num_workers}")
+        print(f"  cobra_min_objective: {cobra_min_objective}")
+        print(f"  max_varmed_scale: {max_varmed_scale}")
+        print(f"  biomass_threshold (post-filter): {biomass_threshold}")
         print()
     
     # Define file paths
@@ -275,6 +286,8 @@ def create_reservoir_training_dataset(config):
             parameter.valmed,
             parameter.ratmed,
             parameter.method,
+            cobra_min_objective,
+            max_varmed_scale,
         ),
     ) as pool:
         # Submit all conditions asynchronously
@@ -329,6 +342,21 @@ def create_reservoir_training_dataset(config):
                 j = get_index_from_id(rid, parameter.model.reactions)
                 combined_X[:, col] = combined_Y[:, j]
                 col += 1
+        
+        # Post-filter samples with near-zero biomass
+        if biomass_threshold is not None:
+            obj_reaction_id = parameter.objective[0]
+            obj_col_idx = get_index_from_id(obj_reaction_id, parameter.model.reactions)
+            biomass_values = combined_Y[:, obj_col_idx]
+            valid_mask = np.abs(biomass_values) >= biomass_threshold
+            n_before = combined_X.shape[0]
+            combined_X = combined_X[valid_mask]
+            combined_Y = combined_Y[valid_mask]
+            n_after = combined_X.shape[0]
+            if verbose:
+                print(f"\nPost-filtering: removed {n_before - n_after} samples "
+                      f"with biomass < {biomass_threshold}")
+                print(f"  Samples before: {n_before}, after: {n_after}")
         
         parameter.X = combined_X
         parameter.Y = combined_Y

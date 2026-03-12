@@ -20,7 +20,16 @@ mediumfile: 'aidaying_parameters'  # Name of the medium parameters file (without
 
 # Training set generation parameters
 size: 924  # Number of experimental conditions
-size_i: 200  # Training set size per (unique) condition
+size_i: 300  # Training set size per (unique) condition
+
+# X-value scaling: cap the (L_in_varmed+1) multiplier to keep X in a tighter range
+cap_varmed: true
+max_varmed_scale: 5  # Upper bound on the scaling factor
+
+# Zero-growth filtering
+cobra_min_objective: 0.01  # Minimum objective during generation
+filter_zero_biomass: true  # Post-filter samples with near-zero biomass
+biomass_threshold: 0.01    # Discard samples < this value
 
 # Parallelism
 num_workers: 18  # Number of parallel worker processes for FBA simulations - match to the number of cores

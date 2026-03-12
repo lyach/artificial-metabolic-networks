@@ -483,7 +483,8 @@ def run_cobra(model, objective, IN, method='FBA', verbose=False,
 def create_random_medium_cobra(model, objective, 
                                medium, mediumbound, in_varmed, levmed, valmed, ratmed,
                                method='FBA', verbose=False,
-                               cobra_min_objective=1.0e-3):
+                               cobra_min_objective=0.01,
+                               max_varmed_scale=None):
     # Generate a random input and get Cobra's output
     # Input:
     # - model
@@ -541,7 +542,8 @@ def create_random_medium_cobra(model, objective,
         for i in range(X):
             j = varmed[i]
             k = medium[j]
-            v = (L_in_varmed+1) * np.random.randint(1,high=levmed[j]) * valmed[j]/(levmed[j]-1)
+            scale = min(L_in_varmed+1, max_varmed_scale) if max_varmed_scale else (L_in_varmed+1)
+            v = scale * np.random.randint(1,high=levmed[j]) * valmed[j]/(levmed[j]-1)
             INFLUX[k], model.medium[k] = v, v
 
         # check with cobra
@@ -570,7 +572,8 @@ def create_random_medium_cobra(model, objective,
 
 def get_io_cobra(model, objective, 
                  medium, mediumbound, varmed, levmed, valmed, ratmed,
-                 E, method='FBA', inf={}, verbose=False):
+                 E, method='FBA', inf={}, verbose=False,
+                 cobra_min_objective=0.01, max_varmed_scale=None):
     # Generate a random input and get Cobra's output
     # Input:
     # - model: the cobra model
@@ -589,7 +592,9 @@ def get_io_cobra(model, objective,
         inf = create_random_medium_cobra(model, objective, 
                                          medium, mediumbound,
                                          varmed, levmed, valmed.copy(), ratmed,
-                                         method=method,verbose=verbose)
+                                         method=method, verbose=verbose,
+                                         cobra_min_objective=cobra_min_objective,
+                                         max_varmed_scale=max_varmed_scale)
     out,obj = run_cobra(model,objective,inf,method=method,verbose=verbose)
     Y = np.asarray(list(out.values()))
     X = np.asarray([ inf[medium[i]] for i in range(len(medium)) ])
