@@ -4,7 +4,7 @@
 
 # Number of seeds for repeated training
 # Multiple seeds provide robust performance estimates
-number_of_seeds: 3
+number_of_seeds: 1
 
 # Training dataset name (located in data/interim/)
 # This is the experimental media composition + growth rate dataset

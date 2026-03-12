@@ -344,9 +344,21 @@ def input_AMN(parameter, verbose=False):
     # For AMN_Wt repeat X timestep times
 
     X, Y = parameter.X, parameter.Y
-    if parameter.scaler != 0: # Normalize X
-        X, parameter.scaler = MaxScaler(X)                 
-    if verbose: print('AMN scaler', parameter.scaler)
+    _do_scale = isinstance(parameter.scaler, np.ndarray) or parameter.scaler != 0
+    if _do_scale: # Normalize X
+        if getattr(parameter, 'per_feature_norm', False):
+            col_max = np.max(X, axis=0)
+            col_max[col_max == 0] = 1.0
+            X = X / col_max
+            parameter.scaler = col_max
+            if verbose:
+                print('AMN per-feature scaler: min={:.4g}, max={:.4g}, '
+                      'mean={:.4g} ({}  features)'.format(
+                          col_max.min(), col_max.max(),
+                          col_max.mean(), len(col_max)))
+        else:
+            X, parameter.scaler = MaxScaler(X)
+            if verbose: print('AMN scaler', parameter.scaler)
     if getattr(parameter, 'y_scale', False):
         Y, parameter.y_scaler = MaxScaler(Y)
         if verbose: print('AMN Y scaler', parameter.y_scaler)
@@ -1369,6 +1381,7 @@ class Neural_Model:
                  niter=0, xfold=5, # Cross valisation LOO does not work
                  es=True, # early stopping
                  y_scale=False, # scale Y (flux targets) by max
+                 per_feature_norm=False, # per-column X normalization
                  verbose=False,
                 ):
         # Create empty object
@@ -1382,6 +1395,7 @@ class Neural_Model:
         self.scaler = float(scaler) # From bool to float
         self.y_scale = bool(y_scale)
         self.y_scaler = 1.0
+        self.per_feature_norm = bool(per_feature_norm)
         self.input_dim = input_dim 
         self.output_dim = output_dim 
         self.n_hidden = n_hidden
@@ -1470,10 +1484,11 @@ class Neural_Model:
             if d:
                 os.makedirs(d, exist_ok=True)
 
+        scaler_val = float(np.max(self.scaler)) if isinstance(self.scaler, np.ndarray) else float(self.scaler)
         s = str(self.trainingfile) + ","\
                     + str(self.model_type) + ","\
                     + str(self.objective) + ","\
-                    + str(self.scaler) + ","\
+                    + str(scaler_val) + ","\
                     + str(self.input_dim) + ","\
                     + str(self.output_dim) + ","\
                     + str(self.n_hidden) + ","\
@@ -1490,7 +1505,8 @@ class Neural_Model:
                     + str(self.niter) + ","\
                     + str(self.xfold) + ","\
                     + str(self.es) + ","\
-                    + str(self.y_scaler)
+                    + str(self.y_scaler) + ","\
+                    + str(getattr(self, 'per_feature_norm', False))
         with open(fileparam, "w") as h:
             # print(s, file = h)
             h.write(s)
@@ -1566,6 +1582,7 @@ class Neural_Model:
         self.es = True if K[19] == 'True' else False
         self.y_scaler = float(K[20]) if len(K) > 20 else 1.0
         self.y_scale = self.y_scaler not in (1.0, 1.0e12)
+        self.per_feature_norm = (K[21].strip() == 'True') if len(K) > 21 else False
         # Make objective a list
         self.objective = self.objective.replace('[', '')
         self.objective = self.objective.replace(']', '')
@@ -1608,8 +1625,14 @@ class Neural_Model:
             sys.stdout = open(filename, 'a')
         print('training file:', self.trainingfile)
         print('model type:', self.model_type)
-        print('model scaler:', self.scaler)
+        if isinstance(self.scaler, np.ndarray):
+            print('model scaler: per-feature ({} features, '
+                  'min={:.4g}, max={:.4g})'.format(
+                      len(self.scaler), self.scaler.min(), self.scaler.max()))
+        else:
+            print('model scaler:', self.scaler)
         print('model y_scaler:', getattr(self, 'y_scaler', 1.0))
+        print('model per_feature_norm:', getattr(self, 'per_feature_norm', False))
         print('model input dim:', self.input_dim)
         print('model output dim:', self.output_dim)
         print('model medium bound:', self.mediumbound)

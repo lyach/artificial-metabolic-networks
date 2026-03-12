@@ -106,6 +106,7 @@ def train_eval_reservoir(config):
     batch_size = config['batch_size']
     es = config['es']
     y_scale = config.get('y_scale', False)
+    per_feature_norm = config.get('per_feature_norm', False)
     # Stratified CV parameters (optional, default to False)
     stratify = config.get('stratify', False)
     stratify_bins = config.get('stratify_bins', 10)
@@ -156,6 +157,7 @@ def train_eval_reservoir(config):
             print(f"  Batch size: {batch_size}")
             print(f"  Early stopping: {es}")
             print(f"  Y scaling: {y_scale}")
+            print(f"  Per-feature normalization: {per_feature_norm}")
             print(f"  Console log file: {log_filepath}")
             print()
         
@@ -185,6 +187,7 @@ def train_eval_reservoir(config):
             batch_size=batch_size,
             es=es,
             y_scale=y_scale,
+            per_feature_norm=per_feature_norm,
             verbose=verbose,
         )
         
