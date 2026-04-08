@@ -6,10 +6,10 @@ import seaborn as sns
 
 FONT_SIZE = 15
 
-def plot_learning_curve(result_folder):
+def plot_learning_curve(result_folder, number_of_seeds=3):
     """
-    Plot learning and validation curves across epochs,
-    averaging over 5 folds.
+    Plot learning curves across epochs, averaging over folds.
+    Left panel: R² (training vs validation). Right panel: loss (training vs validation).
     
     Args:
         result_folder (str): Path to the result folder
@@ -59,62 +59,67 @@ def plot_learning_curve(result_folder):
     
     epochs = np.arange(n_epochs)
     
-    # Create figure with 2 panels
+    # Read R² values from cv_fold_metrics.csv
+    metrics_file = result_path / 'cv_fold_metrics.csv'
+    if metrics_file.exists():
+        metrics_df = pd.read_csv(metrics_file)
+        train_r2_final = metrics_df['r2_train'].mean()
+        train_r2_final_std = metrics_df['r2_train'].std()
+        val_r2_final = metrics_df['r2_test'].mean()
+        val_r2_final_std = metrics_df['r2_test'].std()
+    else: # if used multiple seeds, average
+        for seed in range(number_of_seeds): 
+            metrics_file = result_path / f'seed{seed}_cv_fold_metrics.csv'
+            metrics_df = pd.read_csv(metrics_file)
+            train_r2_final += metrics_df['r2_train'].mean()
+            train_r2_final_std += metrics_df['r2_train'].std()
+            val_r2_final += metrics_df['r2_test'].mean()
+            val_r2_final_std += metrics_df['r2_test'].std()
+        train_r2_final /= number_of_seeds
+        train_r2_final_std /= number_of_seeds
+        val_r2_final /= number_of_seeds
+        val_r2_final_std /= number_of_seeds
+    
+    # Final epoch values for loss legend
+    train_loss_final = loss_mean[-1]
+    train_loss_final_std = loss_std[-1]
+    val_loss_final = val_loss_mean[-1]
+    val_loss_final_std = val_loss_std[-1]
+    
+    # Create figure with 2 panels: R² | Loss
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Panel 1: Training curves
+    # Panel 1: R² — training vs validation
     ax1 = axes[0]
-    ax1_twin = ax1.twinx()
-    
-    # Plot training loss
-    line1 = ax1.plot(epochs, loss_mean, 'b-', label='Training Loss', linewidth=2)
-    ax1.fill_between(epochs, loss_mean - loss_std, loss_mean + loss_std, 
-                      color='b', alpha=0.2)
-    
-    # Plot training R2
-    line2 = ax1_twin.plot(epochs, my_r2_mean, 'r-', label='Training R²', linewidth=2)
-    ax1_twin.fill_between(epochs, my_r2_mean - my_r2_std, my_r2_mean + my_r2_std,
-                           color='r', alpha=0.2)
-    
+    ax1.plot(epochs, my_r2_mean, 'b-',
+             label=f'Training R² = {train_r2_final:.3f} ± {train_r2_final_std:.3f}', linewidth=2)
+    ax1.fill_between(epochs, my_r2_mean - my_r2_std, my_r2_mean + my_r2_std,
+                     color='b', alpha=0.2)
+    ax1.plot(epochs, val_my_r2_mean, color='#ff7f0e', linestyle='-',
+             label=f'Validation R² = {val_r2_final:.3f} ± {val_r2_final_std:.3f}', linewidth=2)
+    ax1.fill_between(epochs, val_my_r2_mean - val_my_r2_std, val_my_r2_mean + val_my_r2_std,
+                     color='#ff7f0e', alpha=0.2)
     ax1.set_xlabel('Epoch', fontsize=12)
-    ax1.set_ylabel('Loss', color='b', fontsize=12)
-    ax1_twin.set_ylabel('R²', color='r', fontsize=12)
-    ax1.tick_params(axis='y', labelcolor='b')
-    ax1_twin.tick_params(axis='y', labelcolor='r')
-    ax1.set_title('Training', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('R²', fontsize=12)
+    ax1.set_title('R²', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
+    ax1.legend(loc='best')
     
-    # Combine legends
-    lines = line1 + line2
-    labels = [l.get_label() for l in lines]
-    ax1.legend(lines, labels, loc='best')
-    
-    # Panel 2: Validation curves
+    # Panel 2: Loss — training vs validation
     ax2 = axes[1]
-    ax2_twin = ax2.twinx()
-    
-    # Plot validation loss
-    line3 = ax2.plot(epochs, val_loss_mean, 'b-', label='Validation Loss', linewidth=2)
+    ax2.plot(epochs, loss_mean, 'b-',
+             label=f'Training Loss = {train_loss_final:.3f} ± {train_loss_final_std:.3f}', linewidth=2)
+    ax2.fill_between(epochs, loss_mean - loss_std, loss_mean + loss_std,
+                     color='b', alpha=0.2)
+    ax2.plot(epochs, val_loss_mean, color='#ff7f0e', linestyle='-',
+             label=f'Validation Loss = {val_loss_final:.3f} ± {val_loss_final_std:.3f}', linewidth=2)
     ax2.fill_between(epochs, val_loss_mean - val_loss_std, val_loss_mean + val_loss_std,
-                      color='b', alpha=0.2)
-    
-    # Plot validation R2
-    line4 = ax2_twin.plot(epochs, val_my_r2_mean, 'r-', label='Validation R²', linewidth=2)
-    ax2_twin.fill_between(epochs, val_my_r2_mean - val_my_r2_std, val_my_r2_mean + val_my_r2_std,
-                           color='r', alpha=0.2)
-    
+                     color='#ff7f0e', alpha=0.2)
     ax2.set_xlabel('Epoch', fontsize=12)
-    ax2.set_ylabel('Loss', color='b', fontsize=12)
-    ax2_twin.set_ylabel('R²', color='r', fontsize=12)
-    ax2.tick_params(axis='y', labelcolor='b')
-    ax2_twin.tick_params(axis='y', labelcolor='r')
-    ax2.set_title('Validation', fontsize=14, fontweight='bold')
+    ax2.set_ylabel('Loss', fontsize=12)
+    ax2.set_title('Loss', fontsize=14, fontweight='bold')
     ax2.grid(True, alpha=0.3)
-    
-    # Combine legends
-    lines = line3 + line4
-    labels = [l.get_label() for l in lines]
-    ax2.legend(lines, labels, loc='best')
+    ax2.legend(loc='best')
     
     plt.tight_layout()
     
