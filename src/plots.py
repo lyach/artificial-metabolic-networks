@@ -6,13 +6,14 @@ import seaborn as sns
 
 FONT_SIZE = 15
 
-def plot_learning_curve(result_folder, number_of_seeds=3):
+def plot_learning_curve(result_folder, seed=0):
     """
     Plot learning curves across epochs, averaging over folds.
     Left panel: R² (training vs validation). Right panel: loss (training vs validation).
     
     Args:
         result_folder (str): Path to the result folder
+        seed (int): Seed to plot
 
     Returns:
         fig: matplotlib figure object
@@ -25,7 +26,11 @@ def plot_learning_curve(result_folder, number_of_seeds=3):
     
     # Read all fold history files
     fold_data = []
-    history_files = sorted(result_path.glob('*history.csv'))
+    if seed is not None:
+        print(f"Plotting seed {seed}")
+        history_files = sorted(result_path.glob(f'seed{seed}_*history.csv'))
+    else:
+        history_files = sorted(result_path.glob('*history.csv'))
     
     print(f"Found {len(history_files)} history files.")
     for fold_file in history_files:
@@ -59,28 +64,11 @@ def plot_learning_curve(result_folder, number_of_seeds=3):
     
     epochs = np.arange(n_epochs)
     
-    # Read R² values from cv_fold_metrics.csv
-    metrics_file = result_path / 'cv_fold_metrics.csv'
-    if metrics_file.exists():
-        metrics_df = pd.read_csv(metrics_file)
-        train_r2_final = metrics_df['r2_train'].mean()
-        train_r2_final_std = metrics_df['r2_train'].std()
-        val_r2_final = metrics_df['r2_test'].mean()
-        val_r2_final_std = metrics_df['r2_test'].std()
-    else: # if used multiple seeds, average
-        for seed in range(number_of_seeds): 
-            metrics_file = result_path / f'seed{seed}_cv_fold_metrics.csv'
-            metrics_df = pd.read_csv(metrics_file)
-            train_r2_final += metrics_df['r2_train'].mean()
-            train_r2_final_std += metrics_df['r2_train'].std()
-            val_r2_final += metrics_df['r2_test'].mean()
-            val_r2_final_std += metrics_df['r2_test'].std()
-        train_r2_final /= number_of_seeds
-        train_r2_final_std /= number_of_seeds
-        val_r2_final /= number_of_seeds
-        val_r2_final_std /= number_of_seeds
-    
     # Final epoch values for loss legend
+    train_r2_final = my_r2_mean[-1]
+    train_r2_final_std = my_r2_std[-1]
+    val_r2_final = val_my_r2_mean[-1]
+    val_r2_final_std = val_my_r2_std[-1]
     train_loss_final = loss_mean[-1]
     train_loss_final_std = loss_std[-1]
     val_loss_final = val_loss_mean[-1]
