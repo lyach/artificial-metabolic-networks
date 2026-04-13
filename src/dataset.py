@@ -14,7 +14,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import cobra
 import numpy as np
@@ -220,6 +220,236 @@ def get_objective_reaction(model: cobra.Model) -> tuple[str, int]:
     return obj_id, obj_idx
 
 
+def screen_out_in(
+    model: cobra.Model,
+    io_dict: dict[str, list[tuple[Optional[str], Optional[str]]]],
+    unsignificant_mols: list[str],
+    problematic_reacs: Optional[list[str]] = None,
+) -> dict[str, list[Any]]:
+    """
+    Method by Faure et al. (2023)
+    
+    Screen reactions for compartment-changing flux and encode direction (in/out).
+    Records whether each reaction moves metabolites between compartments and how
+    bounds are encoded (reversible, forward-only, backward-only, or other).
+
+    Args:
+        model: SBML model to screen.
+        io_dict: Maps suffix keys (e.g. ``_i``, ``_o``) to lists of
+            (reactant_compartment, product_compartment) pairs to count.
+        unsignificant_mols: Metabolite IDs ignored when assigning compartments.
+        problematic_reacs: Reaction IDs to treat specially when rescreening; if
+            None, starts as an empty list.
+            
+    Returns:
+        Mapping from reaction ID to ``[io_count_dict, way]``
+    """
+    if problematic_reacs is None:
+        problematic_reacs = []
+
+    reac_id_to_io_count_and_way: dict[str, list[Any]] = {}
+
+    for reac in model.reactions:
+        ub = reac.upper_bound
+        lb = reac.lower_bound
+
+        compartments_reactants: set[Optional[str]] = set()
+        compartments_products: set[Optional[str]] = set()
+        reactants = reac.reactants
+        products = reac.products
+
+        if len(products) == 0:
+            compartments_products.add(None)
+        if len(reactants) == 0:
+            compartments_reactants.add(None)
+            warnings.warn(
+                f"Reaction {reac.id} has no reactants (unexpected for exchange/sink).",
+                stacklevel=2,
+            )
+
+        for reactant in reactants:
+            if reactant.id in unsignificant_mols and reac.id in problematic_reacs:
+                continue
+            comp = reactant.id.split("_")[-1]
+            if comp.endswith("MNXC3"):
+                comp = "c"
+            if comp in ["c", "p", "e", "m"]:
+                compartments_reactants.add(comp)
+
+        for product in products:
+            if product.id in unsignificant_mols and reac.id in problematic_reacs:
+                continue
+            comp = product.id.split("_")[-1]
+            if comp.endswith("MNXC3"):
+                comp = "c"
+            if comp in ["c", "p", "e", "m"]:
+                compartments_products.add(comp)
+
+        if ub > 0 and lb < 0:
+            way = "r"
+        elif ub == 0 and lb < 0:
+            way = "b"
+        elif lb == 0 and ub > 0:
+            way = "f"
+        else:
+            way = "o"
+
+        if way == "r" or reac.id.startswith("EX_") or way == "b":
+            if compartments_reactants != compartments_products:
+                this_reac_pairs = []
+                for comp_r in compartments_reactants:
+                    for comp_p in compartments_products:
+                        if comp_r == comp_p:
+                            continue
+                        this_reac_pairs.append((comp_r, comp_p))
+
+                io_count_dict = {"_i": 0, "_o": 0}
+                for pair in this_reac_pairs:
+                    for suffix_key in io_dict:
+                        if pair in io_dict[suffix_key]:
+                            io_count_dict[suffix_key] += 1
+
+                if (
+                    io_count_dict["_i"] != 0
+                    and io_count_dict["_o"] != 0
+                    and reac.id not in problematic_reacs
+                ):
+                    problematic_reacs.append(reac.id)
+                    warnings.warn(
+                        f"Problematic reaction {reac.id}: {reac.reaction} "
+                        f"{io_count_dict}",
+                        stacklevel=2,
+                    )
+
+                reac_id_to_io_count_and_way[reac.id] = [io_count_dict, way]
+            else:
+                io_count_dict = {"_i": 0, "_o": 0}
+                reac_id_to_io_count_and_way[reac.id] = [io_count_dict, way]
+
+    if len(problematic_reacs) > 0:
+        return screen_out_in(model, io_dict, unsignificant_mols, problematic_reacs)
+
+    return reac_id_to_io_count_and_way
+
+
+def duplicate_model(
+    model: cobra.Model,
+    reac_id_to_io_count_and_way: dict[str, list[Any]],
+) -> cobra.Model:
+    """
+    Method by Faure et al. (2023)
+    
+    Duplicate reversible and exchange reactions so fluxes can be non-negative.
+
+    Args:
+        model: Original COBRA model.
+        reac_id_to_io_count_and_way: Output of :func:`screen_out_in`.
+
+    Returns:
+        A copy of the model with duplicated or recoded reactions.
+    """
+    new_model = model.copy()
+
+    for rxn_id in reac_id_to_io_count_and_way:
+        i_or_o, way = reac_id_to_io_count_and_way[rxn_id]
+        nbr_in = i_or_o["_i"]
+        nbr_out = i_or_o["_o"]
+        if nbr_in > nbr_out:
+            suffix = "_i"
+            rev_suffix = "_o"
+        if nbr_out > nbr_in:
+            suffix = "_o"
+            rev_suffix = "_i"
+        if (nbr_out == 0 and nbr_in == 0) or nbr_out == nbr_in:
+            suffix = "_for"
+            rev_suffix = "_rev"
+
+        reac = new_model.reactions.get_by_id(rxn_id)
+
+        if (
+            reac.id.startswith("DM_")
+            or reac.id.endswith("sink")
+            or (not reac.id.startswith("EX_") and way == "f")
+            or way == "o"
+        ):
+            continue
+
+        if way == "b" and not reac.id.startswith("EX_"):
+            reversed_upper = -reac.lower_bound
+            ori_name = reac.id
+            new_name = reac.id + rev_suffix
+
+            duplicated = cobra.Reaction(new_name)
+            duplicated.bounds = (0, reversed_upper)
+
+            new_model.add_reactions([duplicated])
+
+            rev_metabolites = {
+                met.id: -reac.metabolites[met] for met in reac.metabolites
+            }
+            duplicated.add_metabolites(rev_metabolites)
+
+            new_model.remove_reactions([reac])
+
+            new_model.reactions.get_by_id(new_name).id = ori_name
+        else:
+            if way == "r":
+                reversed_upper = -reac.lower_bound
+                normal_upper = reac.upper_bound
+            if way == "f":
+                reversed_upper = reac.upper_bound
+                normal_upper = reac.upper_bound
+            if way == "b":
+                reversed_upper = -reac.lower_bound
+                normal_upper = -reac.lower_bound
+
+            reac.bounds = (0, normal_upper)
+
+            duplicated = cobra.Reaction(reac.id + rev_suffix)
+            duplicated.bounds = (0, reversed_upper)
+
+            new_model.add_reactions([duplicated])
+
+            rev_metabolites = {
+                met.id: -reac.metabolites[met] for met in reac.metabolites
+            }
+            duplicated.add_metabolites(rev_metabolites)
+
+            reac.id += suffix
+            
+    print("The default model had " + str(len(model.reactions)) + 
+        " reactions and the duplicated-reactions model has " + 
+        str(len(new_model.reactions)) + " reactions.")
+    
+    return new_model
+
+
+def correct_duplicated_med(
+    default_med: dict[str, float],
+    duplicated_med: dict[str, float],
+) -> dict[str, float]:
+    """
+    Method by Faure et al. (2023)
+    
+    Align duplicated-model exchange upper bounds with the original medium.
+    Duplicated exchange reactions gain suffixes; this copies bounds from the
+    default medium keys that match each duplicated key prefix.
+
+    Args:
+        default_med: Medium dict from the original model.
+        duplicated_med: Medium dict from the duplicated model.
+
+    Returns:
+        The same ``duplicated_med`` mapping with corrected values.
+    """
+    for dup_key in duplicated_med:
+        duplicated_med[dup_key] = 1e-300
+        for def_key in default_med:
+            if dup_key.startswith(def_key):
+                duplicated_med[dup_key] = default_med[def_key]
+    return duplicated_med
+
+
 def extract_model_matrices(
     model: cobra.Model,
     medium_ids: Sequence[str],
@@ -284,19 +514,18 @@ def duplicate_reversible_reactions(
 ) -> cobra.Model:
     """
     Duplicate reversible reactions to make all fluxes positive.
-    
-    This is a simplified version of the Duplicate_Model functions.
-    
+
+    Wraps :func:`screen_out_in`, :func:`duplicate_model`, and
+    :func:`correct_duplicated_med` with default compartment-transfer rules.
+
     Args:
         model: Original COBRA model
         io_dict: Dictionary mapping suffixes to compartment transfers
         unsignificant_mols: Molecules to ignore in screening
-        
+
     Returns:
         New model with duplicated reactions
     """
-    from src.Duplicate_Model import screen_out_in, duplicate_model, correct_duplicated_med
-    
     if io_dict is None:
         io_dict = {
             "_i": [(None, "e"), (None, "c"), ("e", "p"), ("p", "c"), ("e", "c"), ("c", "m"), ("p", "m")],
