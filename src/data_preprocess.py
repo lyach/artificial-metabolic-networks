@@ -135,14 +135,14 @@ def create_media_growth_csv(aida_dir: Path, mapping_csv: Path, output_dir: Path)
     M = build_mapping_matrix(mapping_csv, media_df.columns.tolist())
     
     # Identify what was NOT renamed/mapped
+    excluded_non_compound_cols = {"Condition ID", "Compound ID", "Label", "Assay ID"}
     not_renamed_cols = [
-        col for col in media_df.columns 
-        if col not in M.index and col != "Condition ID"
+        col for col in media_df.columns
+        if col not in M.index and col not in excluded_non_compound_cols
     ]
     
-    print(f"Mapped {len(M.index)} AIDA columns into {len(M.columns)} GEM reactions.")
-    print(f"{len(not_renamed_cols)} media columns were not mapped.")
-    print(f"Columns not renamed: {not_renamed_cols}")
+    print(f"Mapped {len(M.index)} experimental compounds into {len(M.columns)} GEM reactions.")
+    print(f"{len(not_renamed_cols)} experimental compounds not mapped: {not_renamed_cols if not_renamed_cols else 'None'}")
 
     # Use Matrix Multiplication to transform the data (Handles Summing & Stoichiometry)
     A = media_df[M.index].fillna(0.0)

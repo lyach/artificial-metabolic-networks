@@ -458,7 +458,7 @@ def extract_model_matrices(
     Extract matrices and vectors from a COBRA model for differentiable FBA.
     
     Args:
-        model: COBRA model (should be irreversible/duplicated)
+        model: COBRA model (irreversible format)
         medium_ids: List of exchange reaction IDs that are in the medium
         
     Returns:
