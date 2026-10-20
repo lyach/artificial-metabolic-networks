@@ -1,0 +1,18 @@
+# Configuration for making the GEM AMN-compatible (step 1)
+# This config is used by scripts/prepare_gem.py
+
+# Input COBRA model (located in data/raw/, without .xml extension)
+cobraname: 'iML1515'
+
+# Outputs (located in data/interim/, without extension)
+output_model: 'iML1515_duplicated'          # Duplicated (irreversible) model, .xml
+output_medium: 'iML1515_medium_corrected'   # Default medium of the duplicated model, .csv
+
+# Compartment transitions that define an uptake (_i) or a secretion (_o)
+# reaction, as [from, to] pairs. null = outside the system (exchange)
+io_dict:
+  _i: [[null, 'e'], [null, 'c'], ['e', 'p'], ['p', 'c'], ['e', 'c'], ['c', 'm'], ['p', 'm']]
+  _o: [['c', null], ['e', null], ['p', 'e'], ['c', 'p'], ['c', 'e'], ['m', 'c'], ['m', 'p']]
+
+# Small molecules ignored when assigning a reaction's direction
+unsignificant_mols: ['h_p', 'h_c', 'pi_c', 'pi_p', 'adp_c', 'h2o_c', 'atp_c']

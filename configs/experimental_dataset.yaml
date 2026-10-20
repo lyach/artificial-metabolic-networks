@@ -1,0 +1,91 @@
+# Configuration for pre-processing the Aida & Ying dataset (step 2)
+# This config is used by scripts/prepare_experimental_dataset.py
+#
+# Fixed file names (set in src/data_preprocess.py):
+#   in : data/external/aidaying_medium.csv, data/external/aidaying_growth.csv
+#        data/interim/iML1515_medium_corrected.csv   (from step 1)
+#   out: data/interim/aidaying_compound_mapping.csv
+#        data/interim/aidaying_media_growth.csv
+#        data/interim/aidaying_media_growth_amns.csv
+
+# COBRA model used to validate the compound -> reaction mapping
+# (located in data/raw/, without .xml extension)
+cobraname: 'iML1515'
+
+# ── 2.2 Medium parameter file ────────────────────────────────────────────────
+
+# Faure et al. parameter file (located in data/external/, without .csv extension)
+faure_parameters: 'faure_parameters'
+
+# Output parameter file (located in data/processed/, without .csv extension)
+output_parameters: 'aidaying_parameters'
+
+# Faure-only carbon sources, removed from the parameter file
+faure_drop:
+  - 'EX_glyc_e_i'
+  - 'EX_rib__D_e_i'
+  - 'EX_malt_e_i'
+  - 'EX_melib_e_i'
+  - 'EX_tre_e_i'
+  - 'EX_fru_e_i'
+  - 'EX_gal_e_i'
+  - 'EX_ac_e_i'
+  - 'EX_lac__D_e_i'
+  - 'EX_succ_e_i'
+  - 'EX_pyr_e_i'
+
+# Sampling parameters for the Aida & Ying compounds
+#   level > 1 : variable compound (ON/OFF, several levels)
+#   level = 1 : always present at max_value
+#   max_value : upper bound (mmol/gDW/h)
+# Compounds shared with the Faure file take these values, not Faure's.
+compound_classes:
+  carbon_sources:
+    level: 100
+    max_value: 10
+    compounds: ['EX_glc__D_e_i', 'EX_cit_e_i']
+  vitamins:
+    level: 100
+    max_value: 0.0001
+    compounds: ['EX_thm_e_i', 'EX_pydxn_e_i', 'EX_tsul_e_i']
+  major_salts:
+    level: 100
+    max_value: 5.0
+    compounds: ['EX_na1_e_i', 'EX_pi_e_i', 'EX_k_e_i', 'EX_cl_e_i']
+  minor_ions:
+    level: 100
+    max_value: 0.0001
+    compounds: ['EX_mobd_e_i', 'EX_cu2_e_i']
+  essential:            # needed for growth: fixed, unlimited supply
+    level: 1
+    max_value: 2.2
+    compounds: ['EX_mg2_e_i', 'EX_nh4_e_i', 'EX_so4_e_i', 'EX_zn2_e_i', 'EX_ca2_e_i', 'EX_fe2_e_i']
+
+# Any Aida & Ying compound not listed above (the amino acids)
+default_class:
+  level: 100
+  max_value: 0.1
+
+# ── 2.3 Padding ──────────────────────────────────────────────────────────────
+
+# Output padded dataset (located in data/interim/, without .csv extension)
+output_padded: 'aidaying_media_growth_amns_padded'
+
+# Compounds present in the medium but not measured by Aida & Ying, added as
+# constant columns (mM, standard E. coli defined-media concentrations).
+# Column order in the output follows this list.
+padding:
+  EX_o2_e_i: 0.21
+  EX_co2_e_i: 0.013
+  EX_h_e_i: 0.0001
+  EX_h2o_e_i: 2.2       # not 55,000 mM: would dominate the feature space
+  EX_fe3_e_i: 0.0005
+  EX_mn2_e_i: 0.0001
+  EX_ni2_e_i: 0.0001
+  EX_sel_e_i: 0.0001
+  EX_cobalt2_e_i: 0.0001
+  EX_tungs_e_i: 0.0001
+  EX_slnt_e_i: 0.0001
+
+# Drop the first condition (zero growth, might bias the model)
+drop_first_row: true

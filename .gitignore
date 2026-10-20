@@ -2,35 +2,26 @@ __pycache__/
 .ipynb_checkpoints/
 .Rhistory
 .DS_Store
-Dataset_input/.DS_Store
-Dataset_model/.DS_Store
-Reservoir/.DS_Store
-Result/.DS_Store
-Xpal_datasets/.DS_Store
 Result/MM_QP_Loss_e_coli_core_EB.csv
 Result/MM_QP_Loss_e_coli_core_UB.csv
-old/
 biolog_simulations.npy
 Reservoir/IJN*.h5
 
-# environment files
+# Environment
 .venv/
 uv.lock
 
-# experiments
-experiments/*
-
 # Large models
 Reservoir/*
+models/*
 
 # Results
 data/interim/*
 data/processed/*
-
-# Slurm 
-scripts/slurm/*
 logs/*
-models/*
 
-# Docs
-docs/*
+# Folders 
+scripts/slurm/*
+.claude/
+local/
+experiments/*
