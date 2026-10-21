@@ -1,8 +1,17 @@
 # Configuration Reference
 
-Each script under `scripts/` reads one YAML file. A missing **required** key stops the script with a `Missing required config keys` error. Optional keys fall back to the defaults below; each script also declares them in a `DEFAULTS` dict at the top of the file. Command-line flags override the matching config key.
+Each script under `scripts/` reads one YAML file:
 
-File names in configs are given **without extensions**, relative to the folder listed for each key.
+- [Prepare GEM](#prepare_gempy)
+- [Prepare experimental dataset](#prepare_experimental_datasetpy)
+- [Create reservoir training dataset](#create_reservoir_training_datasetpy)
+- [Train and evaluate reservoir](#train_eval_reservoirpy)
+- [Train and evaluate ensemble](#train_eval_ensemblepy)
+- [Evaluate medium prediction](#evaluate_medium_predpy)
+
+### Adding a new experiment
+
+Copy the closest config, change the names that identify the run (`run_id`, `reservoirname`, `trainname`, …), and keep the names consistent across steps ([pipeline.md](pipeline.md#how-names-connect-between-steps)). Step 4 does not version its outputs: re-running with the same `reservoirname` and `model_type` overwrites the saved reservoir and the CV files.
 
 ---
 
@@ -58,6 +67,7 @@ Configs: `configs/reservoir_training_dataset.yaml`, `configs/reservoir_training_
 | `size_i` | ✓ | | pFBA samples per unique variable-compound combination |
 | `output_prefix` | ✓ | | Output file name is `<output_prefix>_<mediumbound>.npz` |
 | `num_workers` | | `1` | Worker processes. CLI: `--num-workers / -w` |
+| `chunk_size` | | `10` | Samples per task. Smaller chunks balance the load better, so slow conditions don't stall the end of the run |
 | `cobra_min_objective` | | `0.01` | Random media with a lower objective are redrawn (max 20 attempts) |
 | `cap_varmed` | | `false` | Cap the per-compound scale multiplier |
 | `max_varmed_scale` | | `5` | Cap value, used only if `cap_varmed: true` |
@@ -138,7 +148,3 @@ Config: `configs/evaluate_medium_pred.yaml`
 | `verbose` | | `true` | Prints every compound of every sample, which is very long. CLI: `--verbose / -v` |
 
 ---
-
-## Adding a new experiment
-
-Copy the closest config, change the names that identify the run (`run_id`, `reservoirname`, `trainname`, …), and keep the names consistent across steps ([pipeline.md](pipeline.md#how-names-connect-between-steps)). Step 4 does not version its outputs: re-running with the same `reservoirname` and `model_type` overwrites the saved reservoir and the CV files.

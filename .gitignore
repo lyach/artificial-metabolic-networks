@@ -2,10 +2,6 @@ __pycache__/
 .ipynb_checkpoints/
 .Rhistory
 .DS_Store
-Result/MM_QP_Loss_e_coli_core_EB.csv
-Result/MM_QP_Loss_e_coli_core_UB.csv
-biolog_simulations.npy
-Reservoir/IJN*.h5
 
 # Environment
 .venv/
