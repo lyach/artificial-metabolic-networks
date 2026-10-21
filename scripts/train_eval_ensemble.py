@@ -1,53 +1,32 @@
 #!/usr/bin/env python3
 """
-Train and evaluate ensemble of:
-Artificial Metabolic Network (AMN) Reservoir model and Media Network
+Step 5: Train and evaluate the ensemble (Media Network + AMN Reservoir).
 
-This script creates an ensemble model composed of 2 models:
-1. Media Network, with trainable weights, learns to predict uptake flux bounds from experimental media compositions.
-2. AMN Reservoir, with frozen weights, learns to predict growth rates from uptake flux bounds.
+The ensemble chains two models:
+1. Media Network (trainable): predicts uptake flux bounds from experimental
+   media compositions.
+2. AMN Reservoir (frozen, from step 4): predicts growth from those bounds.
 
-A stratified growth split is created to ensure that each fold contains a representative 
-distribution of the target variable (growth rates) to prevent biases where one fold might only 
-contain high or low growth rates.
-
-Training process is repeated with different seeds to get a trustworthy performance estimate.
+Training is repeated for ``number_of_seeds`` seeds to get a trustworthy
+performance estimate. The predicted uptake fluxes of every seed are saved so
+they can be checked with COBRApy in step 6.
 
 Usage:
     python scripts/train_eval_ensemble.py configs/ensemble_params.yaml
-    python scripts/train_eval_ensemble.py --verbose configs/ensemble_params.yaml
+    python scripts/train_eval_ensemble.py --verbose --seeds 3 configs/ensemble_params.yaml
 """
 
-import sys
-import argparse
 import time
-import os
 from pathlib import Path
-from datetime import datetime
 
-# Suppress TensorFlow/XLA warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ['XLA_FLAGS'] = '--xla_gpu_strict_conv_algorithm_picker=false'
-os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=0 --tf_xla_enable_xla_devices=false'
-
-# Suppress absl logging
-import logging
-logging.getLogger('tensorflow').setLevel(logging.ERROR)
-logging.getLogger('absl').setLevel(logging.ERROR)
-
-import yaml
 import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+import _common
+from _common import DATA_INTERIM_DIR, MODELS_DIR, PROJECT_ROOT, banner, section
 
-# Define data directories
-DATA_INTERIM_DIR = PROJECT_ROOT / 'data' / 'interim'
-MODELS_DIR = PROJECT_ROOT / 'models'
+_common.silence_tensorflow()
 
 from src.Build_Model import RC_Model
 from src.Build_Dataset import read_XY
@@ -57,365 +36,251 @@ from src.Build_Model_Wrappers import (
     ensure_result_dir,
 )
 
-
-# Configuration & main logic
-
-class TeeOutput:
-    """Class to redirect output to both console and file."""
-    def __init__(self, filepath):
-        self.terminal = sys.stdout
-        self.log = open(filepath, 'w')
-    
-    def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
-        self.log.flush()  # Ensure immediate write to file
-    
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
-    
-    def close(self):
-        self.log.close()
+REQUIRED_KEYS = [
+    'number_of_seeds', 'trainname', 'reservoirname', 'n_input',
+    'n_hidden_prior', 'hidden_dim_prior', 'activation_prior',
+    'epochs', 'train_rate', 'batch_size', 'xfold', 'es',
+]
+DEFAULTS = {
+    'stratify': False,
+    'stratify_bins': 10,
+    'verbose': True,
+}
 
 
-def load_config(config_path):
-    """Load configuration from YAML file."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
+def load_reservoir_medium(reservoirfile):
+    """
+    Return the medium reaction IDs, in order, that the reservoir was trained on.
+
+    The reservoir's ``_param.csv`` stores the path of its training ``.npz``.
+    If that absolute path no longer exists (e.g. the project was moved), try
+    successively shorter suffixes of it under ``PROJECT_ROOT``.
+
+    Args:
+        reservoirfile (str): Reservoir path without suffix.
+
+    Returns:
+        list: Medium exchange reaction IDs.
+    """
+    with open(f'{reservoirfile}_param.csv', 'r') as f:
+        trainingfile = Path(f.readline().rstrip().split(',')[0])
+
+    if not Path(f'{trainingfile}.npz').is_file():
+        for n in range(1, len(trainingfile.parts)):
+            candidate = PROJECT_ROOT.joinpath(*trainingfile.parts[n:])
+            if Path(f'{candidate}.npz').is_file():
+                trainingfile = candidate
+                break
+
+    npz = np.load(f'{trainingfile}.npz', allow_pickle=True)
+    return list(npz['medium'])
+
+
+def load_training_data(trainingfile, n_input, reservoirfile):
+    """
+    Load the experimental media/growth data in the reservoir's column order.
+
+    The experimental CSV may order compounds differently from the reservoir's
+    training set, so X columns are permuted to match, then log-transformed
+    as ``log10(1 + X)``.
+
+    Returns:
+        tuple: ``(X, Y, reordered)`` where ``reordered`` says whether the
+        column order changed.
+    """
+    X, Y = read_XY(trainingfile, n_input)
+    exp_cols = pd.read_csv(trainingfile + '.csv', nrows=0).columns[:n_input].tolist()
+    perm = [exp_cols.index(m) for m in load_reservoir_medium(reservoirfile)]
+    X = np.log10(1 + X[:, perm])
+    return X, Y, perm != list(range(len(perm)))
 
 
 def save_seed_predictions(model, pred, seed, trainingfile, result_medium_dir, verbose=True):
     """
-    Save predictions for a single seed to be used as input for COBRApy.
-    
+    Save the predicted uptake fluxes (Vin) and measured growth of one seed.
+
+    The CSV uses the experimental file's header so it can be read back as an
+    experimental dataset by ``scripts/evaluate_medium_pred.py``.
+
+    ``pred`` columns are laid out as ``[obj, Loss_SV, Loss_Vin, Loss_Vpos,
+    V (n_reactions), Vin (scaled)]``.
+
     Args:
-        model: RC_Model instance
-        pred: Prediction array for this seed
-        seed: Seed number
-        trainingfile: Path to training file (for column headers)
-        result_medium_dir: Directory to save output
-        verbose: Print progress information
+        model (RC_Model): Trained ensemble model.
+        pred (np.ndarray): Predictions for this seed.
+        seed (int): Seed number (used in the filename).
+        trainingfile (str): Experimental training file, without ``.csv``.
+        result_medium_dir (Path): Output directory.
+        verbose (bool): Print loss summary.
+
+    Returns:
+        Path: Path to the saved CSV.
     """
-    # Extract loss components
-    obj = pred[:, 0]
-    Loss_SV = pred[:, 1]
-    Loss_Vin = pred[:, 2]
-    Loss_Vpos = pred[:, 3]
-    
+    n_reactions = model.S.shape[1]
+    Loss_SV, Loss_Vin, Loss_Vpos = pred[:, 1], pred[:, 2], pred[:, 3]
     if verbose:
         print(f'\n Constraint losses (seed {seed}):')
         print(f'    Loss SV:   mean={np.mean(Loss_SV):.4f}  max={np.max(Loss_SV):.4f}')
         print(f'    Loss Vin:  mean={np.mean(Loss_Vin):.4f}  max={np.max(Loss_Vin):.4f}')
         print(f'    Loss Vpos: mean={np.mean(Loss_Vpos):.4f}  max={np.max(Loss_Vpos):.4f}')
-    
-    # Extract V and Vin
-    V = pred[:, 4:4 + model.S.shape[1]]
-    Vin_pre_scaling = pred[:, 4 + model.S.shape[1]:]
+
+    # Undo the reservoir's input scaling to get Vin in flux units
+    Vin_scaled = pred[:, 4 + n_reactions:]
     if getattr(model.res, 'per_feature_norm', False):
         col_max = np.max(model.res.X, axis=0)
         col_max[col_max == 0] = 1.0
+        # Only fixed (level == 1) compounds were max-normalised
         scaler = np.ones_like(col_max)
         for i, lev in enumerate(model.res.levmed):
             if lev == 1:
                 scaler[i] = col_max[i]
-        Vin = scaler * Vin_pre_scaling
+        Vin = scaler * Vin_scaled
     else:
-        Vin = model.res.scaler * Vin_pre_scaling
+        Vin = model.res.scaler * Vin_scaled
     XY = np.concatenate((Vin, model.Y), axis=1)
-    
-    # Parse column names from training file (compounds + growth rate)
-    df_cols = pd.read_csv(trainingfile + '.csv', nrows=0).columns
-    
-    # Create a single string separated by commas for the CSV header
-    header_string = ",".join(df_cols)
-    
-    # Check dimensions
-    if XY.shape[1] != len(df_cols):
-        print(f"  Warning: XY has {XY.shape[1]} columns but header has {len(df_cols)} columns.")
-    
-    # Save the file
-    cobra_filename = f'pred_medium_seed{seed}.csv'
-    cobra_path = os.path.join(result_medium_dir, cobra_filename)
-    np.savetxt(cobra_path, XY, delimiter=',', header=header_string, comments='')
-    
+
+    columns = pd.read_csv(trainingfile + '.csv', nrows=0).columns
+    if XY.shape[1] != len(columns):
+        print(f"  Warning: XY has {XY.shape[1]} columns but header has {len(columns)} columns.")
+
+    out_path = Path(result_medium_dir) / f'pred_medium_seed{seed}.csv'
+    np.savetxt(out_path, XY, delimiter=',', header=','.join(columns), comments='')
     if verbose:
-        print(f'    Saved Cobra solution to {cobra_path}')
-    
-    return cobra_path
+        print(f'    Saved Cobra solution to {out_path}')
+    return out_path
 
 
 def train_eval_ensemble(config):
     """
-    Train and evaluate ensemble model (Media Network + AMN Reservoir).
-    
+    Train and evaluate the ensemble over several seeds.
+
+    Outputs, under ``models/<reservoirname>/``:
+        result_ensemble/   per-seed CV files, console log, and
+                           ``<reservoirname>_<model_type>/`` with Q2 and
+                           growth predictions across seeds
+        result_medium/     ``pred_medium_seed<k>.csv`` for every seed
+
     Args:
-        config (dict): Configuration dictionary with parameters
+        config (dict): Configuration (see ``configs/ensemble_params.yaml``).
     """
-    # Extract parameters from config
-    number_of_seeds = config['number_of_seeds']
-    trainname = config['trainname']
+    config = _common.resolve_config(config, REQUIRED_KEYS, DEFAULTS)
+    verbose = config['verbose']
     reservoirname = config['reservoirname']
-    n_input = config['n_input']
-    verbose = config.get('verbose', True)
-    
-    # Model parameters
-    n_hidden_prior = config['n_hidden_prior']
-    hidden_dim_prior = config['hidden_dim_prior']
-    activation_prior = config['activation_prior']
-    epochs = config['epochs']
-    train_rate = config['train_rate']
-    batch_size = config['batch_size']
-    xfold = config['xfold']
-    es = config['es']
-    
-    # Stratified CV parameters (optional, default to False)
-    stratify = config.get('stratify', False)
-    stratify_bins = config.get('stratify_bins', 10)
-    
-    # Build file paths
-    trainingfile = str(DATA_INTERIM_DIR / trainname)
+    number_of_seeds = config['number_of_seeds']
+
+    trainingfile = str(DATA_INTERIM_DIR / config['trainname'])
     reservoirfile = str(MODELS_DIR / reservoirname / 'reservoir' / reservoirname)
-    
-    # Set up output directories
     result_ensemble_dir = MODELS_DIR / reservoirname / 'result_ensemble'
     result_medium_dir = MODELS_DIR / reservoirname / 'result_medium'
     result_ensemble_dir.mkdir(parents=True, exist_ok=True)
     result_medium_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Set up console output logging
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = f"console_log_{timestamp}.txt"
-    log_filepath = os.path.join(str(result_ensemble_dir), log_filename)
-    
-    # Redirect stdout to both console and file
-    original_stdout = sys.stdout
-    tee = TeeOutput(log_filepath)
-    sys.stdout = tee
-    
-    try:
+    log_path = result_ensemble_dir / f'console_log_{_common.timestamp()}.txt'
+
+    with _common.tee_stdout(log_path):
         if verbose:
-            print("=" * 80)
-            print("Step 5: Build Ensemble Model (Media Network + AMN Reservoir)")
-            print("=" * 80)
-            print(f"\nConfiguration:")
-            print(f"  Number of seeds: {number_of_seeds}")
-            print(f"  Training file: {trainname}")
-            print(f"  Reservoir name: {reservoirname}")
-            print(f"  Number of inputs: {n_input}")
-            print(f"  Prior hidden layers: {n_hidden_prior}")
-            print(f"  Prior hidden dimension: {hidden_dim_prior}")
-            print(f"  Prior activation: {activation_prior}")
-            print(f"  Epochs: {epochs}")
-            print(f"  Learning rate: {train_rate}")
-            print(f"  Batch size: {batch_size}")
-            print(f"  Cross-validation folds: {xfold}")
-            print(f"  Stratified CV: {stratify}")
-            if stratify:
-                print(f"  Stratify bins: {stratify_bins}")
-            print(f"  Early stopping: {es}")
-            print(f"  Console log file: {log_filepath}")
-            print()
-        
-        # Load training data
-        X, Y = read_XY(trainingfile, n_input)
-        
-        # Reorder X columns to match the reservoir's medium ordering
-        # The experimental CSV may have a different column order
-        exp_cols = pd.read_csv(trainingfile + '.csv', nrows=0).columns[:n_input].tolist()
-        res_npz_path = str(MODELS_DIR / reservoirname / 'reservoir' / reservoirname)
-        # The reservoir stores its trainingfile path; load the npz to get medium order
-        res_param_csv = res_npz_path + '_param.csv'
-        with open(res_param_csv, 'r') as f:
-            res_trainingfile = f.readline().rstrip().split(',')[0]
-        if not os.path.isfile(res_trainingfile + '.npz'):
-            from pathlib import Path as _P
-            for _n in range(1, len(_P(res_trainingfile).parts)):
-                _suffix = _P(*_P(res_trainingfile).parts[_n:])
-                _candidate = PROJECT_ROOT / _suffix
-                if os.path.isfile(str(_candidate) + '.npz'):
-                    res_trainingfile = str(_candidate)
-                    break
-        res_npz = np.load(res_trainingfile + '.npz', allow_pickle=True)
-        res_medium = list(res_npz['medium'])
-        perm = [exp_cols.index(m) for m in res_medium]
-        X = X[:, perm]
-        
-        # Transform X to log10 scale
-        X = np.log10(1 + X)
-        
+            banner("Step 5: Build Ensemble Model (Media Network + AMN Reservoir)")
+            _common.print_config(config)
+            print(f"Console log file: {log_path}\n")
+
+        X, Y, reordered = load_training_data(trainingfile, config['n_input'], reservoirfile)
         if verbose:
-            reordered = (perm != list(range(len(perm))))
             print(f"  Training data loaded: X shape = {X.shape}, Y shape = {Y.shape}")
             print(f"  Columns reordered to match reservoir: {reordered}")
             print()
-        
-        # Initialize storage for results across seeds
+
         Q2, PRED = [], []
-        model = None  # Will be set in the loop
-        
-        # Training loop over seeds
+        model = None
         for seed in range(number_of_seeds):
             if verbose:
-                print("-" * 80)
-                print(f"Training with seed {seed}")
-                print("-" * 80)
-            
-            # Set random seed
+                section(f"Training with seed {seed}")
             np.random.seed(seed=seed)
-            
-            # Create RC_Model
+
             model = RC_Model(
                 reservoirfile=reservoirfile,
                 X=X, Y=Y,
-                n_hidden_prior=n_hidden_prior,
-                hidden_dim_prior=hidden_dim_prior,
-                activation_prior=activation_prior,
-                epochs=epochs,
-                train_rate=train_rate,
-                batch_size=batch_size,
-                xfold=xfold,
-                stratify=stratify,
-                stratify_bins=stratify_bins,
-                es=es,
-                verbose=verbose
+                n_hidden_prior=config['n_hidden_prior'],
+                hidden_dim_prior=config['hidden_dim_prior'],
+                activation_prior=config['activation_prior'],
+                epochs=config['epochs'],
+                train_rate=config['train_rate'],
+                batch_size=config['batch_size'],
+                xfold=config['xfold'],
+                stratify=config['stratify'],
+                stratify_bins=config['stratify_bins'],
+                es=config['es'],
+                verbose=verbose,
             )
-            
             if verbose:
                 model.printout()
-            
-            # Train and evaluate with per-fold logging
-            rc_result_dir = str(result_ensemble_dir)
-            rc_prefix = f'seed{seed}_cv'
+
             start_time = time.time()
-            reservoir, pred, stats, fold_records = train_evaluate_with_logging(
-                model, result_dir=rc_result_dir, prefix=rc_prefix, verbose=verbose
+            _, pred, stats, _ = train_evaluate_with_logging(
+                model, result_dir=str(result_ensemble_dir),
+                prefix=f'seed{seed}_cv', verbose=verbose,
             )
-            delta_time = time.time() - start_time
-            
-            # Print cross-validation results
-            print_stats(f'{reservoirname} (seed={seed})', stats, delta_time)
+            print_stats(f'{reservoirname} (seed={seed})', stats, time.time() - start_time)
+
             r2 = r2_score(model.Y, pred[:, 0], multioutput='variance_weighted')
             print(f'  Seed {seed}: Collated Q2 = {r2:.4f}')
             Q2.append(r2)
             PRED.append(pred)
-        
-        # Aggregate results across seeds
-        Q2 = np.asarray(Q2)
-        PRED = np.asarray(PRED)
-        
+
+        Q2, PRED = np.asarray(Q2), np.asarray(PRED)
         if verbose:
             print()
-            print("=" * 80)
-            print("Aggregate Results Across Seeds")
-            print("=" * 80)
+            banner("Aggregate Results Across Seeds")
             print(f'\nPredictions shape: {PRED.shape}')
             print(f'Averaged Q2 = {np.mean(Q2):.4f} (+/- {np.std(Q2):.4f})')
-        
-        # Save Q2 scores and predictions
-        rc_result_final_dir = result_ensemble_dir / f'{reservoirname}_{model.model_type}'
-        ensure_result_dir(str(rc_result_final_dir))
-        
-        q2_path = os.path.join(str(rc_result_final_dir), 'Q2_across_seeds.csv')
+
+        final_dir = result_ensemble_dir / f'{reservoirname}_{model.model_type}'
+        ensure_result_dir(str(final_dir))
+
+        q2_path = final_dir / 'Q2_across_seeds.csv'
         np.savetxt(q2_path, Q2, delimiter=',')
         print(f'  Saved Q2 scores to {q2_path}')
-        
-        obj = PRED[:, :, 0]
-        pred_path = os.path.join(str(rc_result_final_dir), 'PRED_objective_across_seeds.csv')
-        np.savetxt(pred_path, obj, delimiter=',')
+
+        pred_path = final_dir / 'PRED_objective_across_seeds.csv'
+        np.savetxt(pred_path, PRED[:, :, 0], delimiter=',')
         print(f'  Saved predictions to {pred_path}')
-        
-        # Save predictions for ALL seeds (for COBRApy)
+
         if verbose:
             print()
-            print("-" * 80)
-            print("Saving Predictions for COBRApy (All Seeds)")
-            print("-" * 80)
-        
+            section("Saving Predictions for COBRApy (All Seeds)")
         for seed in range(number_of_seeds):
-            save_seed_predictions(
-                model=model,
-                pred=PRED[seed],
-                seed=seed,
-                trainingfile=trainingfile,
-                result_medium_dir=str(result_medium_dir),
-                verbose=verbose
-            )
-        
+            save_seed_predictions(model, PRED[seed], seed, trainingfile,
+                                  result_medium_dir, verbose=verbose)
+
         if verbose:
             print()
-            print("=" * 80)
-            print("Ensemble training and evaluation complete!")
-            print("=" * 80)
-            print(f"Results saved to: {rc_result_final_dir}/")
+            banner("Ensemble training and evaluation complete!")
+            print(f"Results saved to: {final_dir}/")
             print(f"Cobra predictions saved to: {result_medium_dir}/")
-            print(f"Console log saved to: {log_filepath}")
+            print(f"Console log saved to: {log_path}")
             print()
-    
-    finally:
-        # Restore original stdout and close log file
-        sys.stdout = original_stdout
-        tee.close()
 
 
 def main():
-    """Main entry point for the script."""
-    parser = argparse.ArgumentParser(
+    parser = _common.build_parser(
         description='Train and evaluate Ensemble model (Media Network + AMN Reservoir)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Example:
-    python scripts/train_eval_ensemble.py configs/ensemble_params.yaml
-        """
+        examples=[
+            'python scripts/train_eval_ensemble.py configs/ensemble_params.yaml',
+            'python scripts/train_eval_ensemble.py --verbose --seeds 3 configs/ensemble_params.yaml',
+        ],
     )
     parser.add_argument(
-        'config',
-        type=str,
-        help='Path to YAML configuration file'
+        '--verbose', '-v', action='store_true', default=None,
+        help='Enable verbose output. Overrides config file setting.',
     )
     parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        default=None,
-        help='Enable verbose output. Overrides config file setting.'
+        '--seeds', '-n', type=int, default=None,
+        help='Number of seeds to use. Overrides config file setting.',
     )
-    parser.add_argument(
-        '--seeds', '-n',
-        type=int,
-        default=None,
-        help='Number of seeds to use. Overrides config file setting.'
-    )
-    
     args = parser.parse_args()
-    
-    # Check if config file exists
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"Error: Configuration file not found: {config_path}")
-        sys.exit(1)
-    
-    # Load configuration
-    try:
-        config = load_config(config_path)
-    except Exception as e:
-        print(f"Error loading configuration file: {e}")
-        sys.exit(1)
-    
-    # CLI arguments override config file values
-    if args.verbose is not None:
-        config['verbose'] = args.verbose
-    if args.seeds is not None:
-        config['number_of_seeds'] = args.seeds
-    
-    # Run the training and evaluation
-    try:
-        train_eval_ensemble(config)
-    except Exception as e:
-        print(f"Error during training and evaluation: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+
+    config = _common.config_from_args(
+        args, {'verbose': args.verbose, 'number_of_seeds': args.seeds}
+    )
+    _common.run_or_exit(train_eval_ensemble, config, 'training and evaluation')
 
 
 if __name__ == '__main__':
