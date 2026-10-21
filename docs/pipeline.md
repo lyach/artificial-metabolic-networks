@@ -113,8 +113,8 @@ python scripts/create_reservoir_training_dataset.py --num-workers 16 configs/res
 The reservoir has to learn the GEM's constraints, which takes far more examples than the ~900 experimental conditions. This step builds that dataset with pFBA:
 
 1. Load the experimental media (`expname`) and the parameter file (`mediumfile`).
-2. For each condition, list its **variable** compounds (`level > 1` in the parameter file and non-zero in the experiment). Duplicate combinations are removed, giving the `varmed` list.
-3. For each entry of `varmed`, draw `size_i` random media in which only those compounds vary, then solve each with pFBA on the duplicated GEM. A draw whose objective is below `cobra_min_objective` is redrawn, up to 20 attempts. Conditions are spread over `num_workers` processes, each seeded with `seed + condition_index`.
+2. For each condition, list its **variable** compounds (`level > 1` in the parameter file and non-zero in the experiment). Compounds are matched **by name**, because the two files list them in different orders. Duplicate combinations are removed, giving the `varmed` list (81 combinations for the current data).
+3. For each entry of `varmed`, draw `size_i` random media in which only those compounds vary, then solve each with pFBA on the duplicated GEM. A draw whose objective is below `cobra_min_objective` is redrawn, up to 20 attempts. Each condition is split into chunks of `chunk_size` samples. The chunks are handed to `num_workers` processes round-robin across conditions, and each chunk is seeded from `seed`, its condition and its chunk index.
 4. Optionally drop samples with biomass below `biomass_threshold` (`filter_zero_biomass: true`).
 5. Save `X` (uptake bounds) and `Y` (all fluxes), together with the model matrices (S, Pin, Pout, …).
 
@@ -124,7 +124,7 @@ The reservoir has to learn the GEM's constraints, which takes far more examples 
 | `data/interim/<expname>.csv` | `data/processed/<run_id>/<output_prefix>_<mediumbound>.xml` |
 | `data/processed/<mediumfile>.csv` | |
 
-This step is CPU-bound and runs for hours at production sizes. Run it as a batch job ([hpc.md](hpc.md)), with `--num-workers` set to `--cpus-per-task`.
+This step is CPU-bound. Run it as a batch job, with `--num-workers` set to `--cpus-per-task`. Some conditions are much slower per sample than others. Because work is handed out in small chunks, those slow conditions are spread over the whole run, so they no longer leave most workers idle at the end. The summary lists the slowest conditions. Lower `chunk_size` if the end of the run still slows down.
 
 ---
 

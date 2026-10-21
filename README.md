@@ -1,4 +1,4 @@
-# Artificial Metabolic Networks 
+# Artificial Metabolic Networks for *E. coli*
 
 A re-implementation of the **AMN-Reservoir** architecture of [Faure et al. (2023)](https://www.nature.com/articles/s41467-023-40380-0), trained on a large-scale, experimental dataset of *Escherichia coli* growth [(Aida & Ying, 2025)](https://doi.org/10.1038/s41597-025-05356-3). The task is:
 
